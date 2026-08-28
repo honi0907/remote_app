@@ -1,4 +1,6 @@
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+#define MyAppVersion "1.0.1"
+#endif
 
 [Setup]
 AppId={{A7C3E5B1-9D2F-4E8A-B6C1-RemoteDesktopLAN}
