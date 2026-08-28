@@ -165,8 +165,12 @@ internal static class MonitorHelper
 internal static class Direct3DHelper
 {
     private const int DriverTypeHardware = 1;
+    private const int DriverTypeWarp = 2;
     private const uint D3D11CreateDeviceBgraSupport = 0x20;
     private static readonly Guid DxgiDeviceGuid = new("A2BFEA4A-771F-44DD-9819-99D0BE320319");
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int QueryInterfaceDelegate(IntPtr thisPtr, ref Guid riid, out IntPtr ppvObject);
 
     [DllImport(
         "d3d11.dll",
@@ -191,9 +195,27 @@ internal static class Direct3DHelper
 
     public static IDirect3DDevice CreateDevice()
     {
+        Exception? lastError = null;
+        foreach (var driverType in new[] { DriverTypeHardware, DriverTypeWarp })
+        {
+            try
+            {
+                return CreateDeviceInternal(driverType);
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+        }
+
+        throw lastError ?? new COMException("Unable to create a Direct3D device for screen capture.");
+    }
+
+    private static IDirect3DDevice CreateDeviceInternal(int driverType)
+    {
         var hr = D3D11CreateDevice(
             IntPtr.Zero,
-            DriverTypeHardware,
+            driverType,
             IntPtr.Zero,
             D3D11CreateDeviceBgraSupport,
             IntPtr.Zero,
@@ -201,7 +223,7 @@ internal static class Direct3DHelper
             7,
             out var d3dDevice,
             out _,
-            out _);
+            out var immediateContext);
 
         if (hr < 0)
         {
@@ -210,11 +232,7 @@ internal static class Direct3DHelper
 
         try
         {
-            var queryHr = Marshal.QueryInterface(d3dDevice, in DxgiDeviceGuid, out var dxgiDevice);
-            if (queryHr < 0)
-            {
-                throw new COMException("QueryInterface for IDXGIDevice failed.", queryHr);
-            }
+            var dxgiDevice = QueryDxgiDevice(d3dDevice);
             try
             {
                 var createHr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out var winRtDevice);
@@ -223,7 +241,14 @@ internal static class Direct3DHelper
                     throw new COMException("CreateDirect3D11DeviceFromDXGIDevice failed.", unchecked((int)createHr));
                 }
 
-                return MarshalInterface<IDirect3DDevice>.FromAbi(winRtDevice);
+                try
+                {
+                    return MarshalInterface<IDirect3DDevice>.FromAbi(winRtDevice);
+                }
+                finally
+                {
+                    Marshal.Release(winRtDevice);
+                }
             }
             finally
             {
@@ -232,7 +257,27 @@ internal static class Direct3DHelper
         }
         finally
         {
+            if (immediateContext != IntPtr.Zero)
+            {
+                Marshal.Release(immediateContext);
+            }
+
             Marshal.Release(d3dDevice);
         }
+    }
+
+    private static IntPtr QueryDxgiDevice(IntPtr d3dDevice)
+    {
+        var vtable = Marshal.ReadIntPtr(d3dDevice);
+        var queryInterfacePtr = Marshal.ReadIntPtr(vtable);
+        var queryInterface = Marshal.GetDelegateForFunctionPointer<QueryInterfaceDelegate>(queryInterfacePtr);
+        var iid = DxgiDeviceGuid;
+        var hr = queryInterface(d3dDevice, ref iid, out var dxgiDevice);
+        if (hr < 0)
+        {
+            throw new COMException("QueryInterface for IDXGIDevice failed.", hr);
+        }
+
+        return dxgiDevice;
     }
 }
