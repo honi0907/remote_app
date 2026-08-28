@@ -10,6 +10,7 @@ using RemoteDesktop.App.Services;
 using Windows.Foundation;
 using Windows.Storage.Streams;
 using Windows.System;
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace RemoteDesktop.App.Views;
 

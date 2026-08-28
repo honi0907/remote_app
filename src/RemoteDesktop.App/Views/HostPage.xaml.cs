@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Navigation;
 using RemoteDesktop.App.Helpers;
 using RemoteDesktop.App.Protocol;
 using RemoteDesktop.App.Services;
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace RemoteDesktop.App.Views;
 
