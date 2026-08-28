@@ -102,7 +102,7 @@ public sealed class ScreenCaptureService : IAsyncDisposable
 
 internal static class MonitorHelper
 {
-    private const int MonitorDefaultTopPrimary = 1;
+    private static readonly Guid GraphicsCaptureItemClassGuid = new("79C3F95B-31F7-4EC2-A464-632EF5D30760");
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
@@ -136,14 +136,24 @@ internal static class MonitorHelper
 
     public static GraphicsCaptureItem CreateItemForMonitor(IntPtr monitorHandle)
     {
-        var interop = (IGraphicsCaptureItemInterop)ActivationFactory.Get(typeof(GraphicsCaptureItem).FullName!);
-        var itemGuid = typeof(GraphicsCaptureItem).GUID;
+        var interop = GraphicsCaptureItem.As<IGraphicsCaptureItemInterop>();
+        var itemGuid = GraphicsCaptureItemClassGuid;
         var itemPointer = interop.CreateForMonitor(monitorHandle, ref itemGuid);
-        return GraphicsCaptureItem.FromAbi(itemPointer);
+        try
+        {
+            return GraphicsCaptureItem.FromAbi(itemPointer);
+        }
+        finally
+        {
+            if (itemPointer != IntPtr.Zero)
+            {
+                Marshal.Release(itemPointer);
+            }
+        }
     }
 
     [ComImport]
-    [Guid("3628E81B-3CAC-4C60-B7F4-23A0E92C655E")]
+    [Guid("3628E81B-3CAC-4C60-B7F4-23CE0E0C3356")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IGraphicsCaptureItemInterop
     {

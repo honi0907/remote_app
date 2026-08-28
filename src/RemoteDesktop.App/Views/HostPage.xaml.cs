@@ -86,9 +86,27 @@ public sealed partial class HostPage : Page
     {
         await DispatcherQueue.EnqueueAsync(async () =>
         {
-            StatusText.Text = "クライアント接続済み - 画面共有中";
-            ConnectedClientText.Text = "接続中のクライアント: 1";
-            await _screenCapture.StartAsync(_cts?.Token ?? CancellationToken.None);
+            try
+            {
+                StatusText.Text = "クライアント接続済み - 画面共有中";
+                ConnectedClientText.Text = "接続中のクライアント: 1";
+                await _screenCapture.StartAsync(_cts?.Token ?? CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "画面共有の開始に失敗しました";
+                ConnectedClientText.Text = "接続中のクライアント: なし";
+                FpsText.Text = "FPS: --";
+
+                var dialog = new ContentDialog
+                {
+                    Title = "画面共有エラー",
+                    Content = ex.Message,
+                    CloseButtonText = "OK",
+                    XamlRoot = XamlRoot,
+                };
+                await dialog.ShowAsync();
+            }
         });
     }
 
