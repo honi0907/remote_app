@@ -1,5 +1,8 @@
 using System.Runtime.InteropServices;
 using RemoteDesktop.App.Protocol;
+using Vortice.Direct3D;
+using Vortice.Direct3D11;
+using Vortice.DXGI;
 using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
@@ -164,13 +167,13 @@ internal static class MonitorHelper
 
 internal static class Direct3DHelper
 {
-    private const int DriverTypeHardware = 1;
-    private const int DriverTypeWarp = 2;
-    private const uint D3D11CreateDeviceBgraSupport = 0x20;
-    private static readonly Guid DxgiDeviceGuid = new("A2BFEA4A-771F-44DD-9819-99D0BE320319");
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int QueryInterfaceDelegate(IntPtr thisPtr, ref Guid riid, out IntPtr ppvObject);
+    private static readonly FeatureLevel[] FeatureLevels =
+    [
+        FeatureLevel.Level_11_1,
+        FeatureLevel.Level_11_0,
+        FeatureLevel.Level_10_1,
+        FeatureLevel.Level_10_0,
+    ];
 
     [DllImport(
         "d3d11.dll",
@@ -180,104 +183,76 @@ internal static class Direct3DHelper
         CallingConvention = CallingConvention.StdCall)]
     private static extern uint CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
 
-    [DllImport("d3d11.dll", EntryPoint = "D3D11CreateDevice", SetLastError = true)]
-    private static extern int D3D11CreateDevice(
-        IntPtr adapter,
-        int driverType,
-        IntPtr software,
-        uint flags,
-        IntPtr featureLevels,
-        uint featureLevelsCount,
-        uint sdkVersion,
-        out IntPtr device,
-        out int featureLevel,
-        out IntPtr immediateContext);
-
     public static IDirect3DDevice CreateDevice()
     {
-        Exception? lastError = null;
-        foreach (var driverType in new[] { DriverTypeHardware, DriverTypeWarp })
+        var errors = new List<string>();
+
+        foreach (var (label, factory) in DeviceFactories)
         {
             try
             {
-                return CreateDeviceInternal(driverType);
+                var d3dDevice = factory();
+                try
+                {
+                    return CreateWinRtDevice(d3dDevice);
+                }
+                catch
+                {
+                    d3dDevice.Dispose();
+                    throw;
+                }
             }
             catch (Exception ex)
             {
-                lastError = ex;
+                errors.Add($"{label}: {FormatException(ex)}");
             }
         }
 
-        throw lastError ?? new COMException("Unable to create a Direct3D device for screen capture.");
+        throw new InvalidOperationException(
+            "Direct3D デバイスを作成できませんでした。\n" + string.Join('\n', errors));
     }
 
-    private static IDirect3DDevice CreateDeviceInternal(int driverType)
-    {
-        var hr = D3D11CreateDevice(
-            IntPtr.Zero,
-            driverType,
-            IntPtr.Zero,
-            D3D11CreateDeviceBgraSupport,
-            IntPtr.Zero,
-            0,
-            7,
-            out var d3dDevice,
-            out _,
-            out var immediateContext);
+    private static IEnumerable<(string Label, Func<ID3D11Device> Factory)> DeviceFactories =>
+    [
+        ("Hardware + BGRA", () => CreateWithDriver(DriverType.Hardware, DeviceCreationFlags.BgraSupport)),
+        ("WARP + BGRA", () => CreateWithDriver(DriverType.Warp, DeviceCreationFlags.BgraSupport)),
+        ("Hardware", () => CreateWithDriver(DriverType.Hardware, DeviceCreationFlags.None)),
+        ("WARP", () => CreateWithDriver(DriverType.Warp, DeviceCreationFlags.None)),
+    ];
 
-        if (hr < 0)
+    private static ID3D11Device CreateWithDriver(DriverType driverType, DeviceCreationFlags flags)
+    {
+        return D3D11.D3D11CreateDevice(driverType, flags, FeatureLevels);
+    }
+
+    private static IDirect3DDevice CreateWinRtDevice(ID3D11Device d3dDevice)
+    {
+        using var dxgiDevice = d3dDevice.QueryInterface<IDXGIDevice>();
+        var createHr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.NativePointer, out var winRtDevice);
+        if (createHr != 0)
         {
-            throw new COMException("D3D11CreateDevice failed.", hr);
+            throw new COMException(
+                $"CreateDirect3D11DeviceFromDXGIDevice failed (0x{createHr:X8}).",
+                unchecked((int)createHr));
         }
 
         try
         {
-            var dxgiDevice = QueryDxgiDevice(d3dDevice);
-            try
-            {
-                var createHr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out var winRtDevice);
-                if (createHr != 0)
-                {
-                    throw new COMException("CreateDirect3D11DeviceFromDXGIDevice failed.", unchecked((int)createHr));
-                }
-
-                try
-                {
-                    return MarshalInterface<IDirect3DDevice>.FromAbi(winRtDevice);
-                }
-                finally
-                {
-                    Marshal.Release(winRtDevice);
-                }
-            }
-            finally
-            {
-                Marshal.Release(dxgiDevice);
-            }
+            return MarshalInterface<IDirect3DDevice>.FromAbi(winRtDevice);
         }
         finally
         {
-            if (immediateContext != IntPtr.Zero)
-            {
-                Marshal.Release(immediateContext);
-            }
-
-            Marshal.Release(d3dDevice);
+            Marshal.Release(winRtDevice);
         }
     }
 
-    private static IntPtr QueryDxgiDevice(IntPtr d3dDevice)
+    private static string FormatException(Exception ex)
     {
-        var vtable = Marshal.ReadIntPtr(d3dDevice);
-        var queryInterfacePtr = Marshal.ReadIntPtr(vtable);
-        var queryInterface = Marshal.GetDelegateForFunctionPointer<QueryInterfaceDelegate>(queryInterfacePtr);
-        var iid = DxgiDeviceGuid;
-        var hr = queryInterface(d3dDevice, ref iid, out var dxgiDevice);
-        if (hr < 0)
+        if (ex is COMException comEx)
         {
-            throw new COMException("QueryInterface for IDXGIDevice failed.", hr);
+            return $"{comEx.Message} (HRESULT 0x{comEx.HResult & 0xFFFFFFFF:X8})";
         }
 
-        return dxgiDevice;
+        return ex.Message;
     }
 }
