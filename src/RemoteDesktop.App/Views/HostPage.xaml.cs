@@ -19,6 +19,7 @@ public sealed partial class HostPage : Page
     private string _pin = string.Empty;
     private int _frameCount;
     private DateTime _fpsWindowStart = DateTime.UtcNow;
+    private bool _isLoadingSettings;
 
     public HostPage()
     {
@@ -36,6 +37,8 @@ public sealed partial class HostPage : Page
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        LoadSettingsIntoUi();
+
         _pin = PinGenerator.CreatePin();
         PinText.Text = _pin;
         IpText.Text = NetworkHelper.GetPrimaryIPv4Address();
@@ -61,6 +64,83 @@ public sealed partial class HostPage : Page
         _cts?.Dispose();
         _cts = null;
         base.OnNavigatedFrom(e);
+    }
+
+    private void LoadSettingsIntoUi()
+    {
+        _isLoadingSettings = true;
+        var settings = HostSettingsStore.Load();
+
+        PresetComboBox.SelectedIndex = settings.Preset switch
+        {
+            StreamQualityPreset.Responsive => 0,
+            StreamQualityPreset.Quality => 1,
+            StreamQualityPreset.Manual => 2,
+            _ => 0,
+        };
+
+        FpsNumberBox.Value = settings.TargetFps;
+        MaxWidthNumberBox.Value = settings.MaxCaptureWidth;
+        QualityNumberBox.Value = settings.JpegQuality;
+        ManualSettingsPanel.Visibility = settings.Preset == StreamQualityPreset.Manual
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        UpdateEffectiveSettingsText();
+        _isLoadingSettings = false;
+    }
+
+    private void PresetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoadingSettings || PresetComboBox.SelectedItem is not ComboBoxItem item)
+        {
+            return;
+        }
+
+        var preset = item.Tag?.ToString() switch
+        {
+            "Quality" => StreamQualityPreset.Quality,
+            "Manual" => StreamQualityPreset.Manual,
+            _ => StreamQualityPreset.Responsive,
+        };
+
+        ManualSettingsPanel.Visibility = preset == StreamQualityPreset.Manual
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        SaveSettingsFromUi(preset);
+    }
+
+    private void ManualSetting_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_isLoadingSettings || PresetComboBox.SelectedIndex != 2)
+        {
+            return;
+        }
+
+        SaveSettingsFromUi(StreamQualityPreset.Manual);
+    }
+
+    private void SaveSettingsFromUi(StreamQualityPreset preset)
+    {
+        var settings = new StreamSettings
+        {
+            Preset = preset,
+            TargetFps = (int)Math.Round(FpsNumberBox.Value),
+            MaxCaptureWidth = (int)Math.Round(MaxWidthNumberBox.Value),
+            JpegQuality = (int)Math.Round(QualityNumberBox.Value),
+        };
+
+        HostSettingsStore.Save(settings);
+        UpdateEffectiveSettingsText();
+    }
+
+    private void UpdateEffectiveSettingsText()
+    {
+        var effective = HostSettingsStore.GetEffectiveSettings();
+        var widthLabel = effective.MaxCaptureWidth <= 0 ? "フル解像度" : $"{effective.MaxCaptureWidth}px 幅";
+        EffectiveSettingsText.Text =
+            $"現在の配信: FPS {effective.TargetFps} / {widthLabel} / JPEG {effective.JpegQuality}";
     }
 
     private void OnClientConnectionRequested(object? sender, string viewerName)
@@ -121,14 +201,14 @@ public sealed partial class HostPage : Page
         });
     }
 
-    private async void OnFrameCaptured(object? sender, (FrameMetadata Metadata, byte[] Jpeg) frame)
+    private void OnFrameCaptured(object? sender, (FrameMetadata Metadata, byte[] Jpeg) frame)
     {
         if (!_sessionServer.HasAuthenticatedClient)
         {
             return;
         }
 
-        await _sessionServer.SendFrameAsync(frame.Metadata, frame.Jpeg);
+        _sessionServer.QueueFrame(frame.Metadata, frame.Jpeg);
 
         _frameCount++;
         var elapsed = DateTime.UtcNow - _fpsWindowStart;

@@ -31,6 +31,44 @@
                 </StackPanel>
             </Border>
 
+            <Border Padding="24" CornerRadius="12" Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="配信設定" FontWeight="SemiBold" />
+                    <ComboBox
+                        x:Name="PresetComboBox"
+                        HorizontalAlignment="Stretch"
+                        SelectionChanged="PresetComboBox_SelectionChanged">
+                        <ComboBoxItem Content="追従優先（FPS 24 / 1280px）" Tag="Responsive" />
+                        <ComboBoxItem Content="画質優先（FPS 15 / フル解像度）" Tag="Quality" />
+                        <ComboBoxItem Content="マニュアル" Tag="Manual" />
+                    </ComboBox>
+                    <StackPanel x:Name="ManualSettingsPanel" Spacing="8" Visibility="Collapsed">
+                        <NumberBox
+                            x:Name="FpsNumberBox"
+                            Header="FPS（10〜30）"
+                            Minimum="10"
+                            Maximum="30"
+                            SpinButtonPlacementMode="Inline"
+                            ValueChanged="ManualSetting_ValueChanged" />
+                        <NumberBox
+                            x:Name="MaxWidthNumberBox"
+                            Header="最大幅（0 = フル解像度）"
+                            Minimum="0"
+                            Maximum="3840"
+                            SpinButtonPlacementMode="Inline"
+                            ValueChanged="ManualSetting_ValueChanged" />
+                        <NumberBox
+                            x:Name="QualityNumberBox"
+                            Header="JPEG 品質（30〜95）"
+                            Minimum="30"
+                            Maximum="95"
+                            SpinButtonPlacementMode="Inline"
+                            ValueChanged="ManualSetting_ValueChanged" />
+                    </StackPanel>
+                    <TextBlock x:Name="EffectiveSettingsText" Opacity="0.7" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
             <TextBlock x:Name="StatusText" />
             <TextBlock x:Name="ConnectedClientText" Opacity="0.8" />
             <TextBlock x:Name="FpsText" Opacity="0.8" Text="FPS: --" />

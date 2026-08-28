@@ -12,6 +12,11 @@ public sealed class SessionClient : IAsyncDisposable
     private Task? _readTask;
     private TaskCompletionSource<ConnectionResponseKind>? _connectionTcs;
     private TaskCompletionSource<AuthResult>? _authTcs;
+    private readonly object _mouseSync = new();
+    private double _pendingMouseX;
+    private double _pendingMouseY;
+    private bool _mouseMovePending;
+    private bool _mouseFlushScheduled;
 
     public event EventHandler<(FrameMetadata Metadata, byte[] Jpeg)>? FrameReceived;
     public event EventHandler<long>? LatencyMeasured;
@@ -28,7 +33,7 @@ public sealed class SessionClient : IAsyncDisposable
         _connectionTcs = new TaskCompletionSource<ConnectionResponseKind>(TaskCreationOptions.RunContinuationsAsynchronously);
         _authTcs = new TaskCompletionSource<AuthResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _client = new TcpClient();
+        _client = new TcpClient { NoDelay = true };
         await _client.ConnectAsync(address, port, cancellationToken);
         _stream = _client.GetStream();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -57,6 +62,24 @@ public sealed class SessionClient : IAsyncDisposable
                 ? "PINが正しくありません。"
                 : "認証に失敗しました。");
         }
+    }
+
+    public void QueueMouseMove(double normalizedX, double normalizedY)
+    {
+        lock (_mouseSync)
+        {
+            _pendingMouseX = normalizedX;
+            _pendingMouseY = normalizedY;
+            _mouseMovePending = true;
+            if (_mouseFlushScheduled)
+            {
+                return;
+            }
+
+            _mouseFlushScheduled = true;
+        }
+
+        _ = FlushMouseMovesAsync();
     }
 
     public async Task SendMouseMoveAsync(double normalizedX, double normalizedY)
@@ -201,5 +224,51 @@ public sealed class SessionClient : IAsyncDisposable
         }
 
         await _stream.WriteAsync(message);
+    }
+
+    private async Task FlushMouseMovesAsync()
+    {
+        while (true)
+        {
+            await Task.Delay(16);
+
+            double normalizedX;
+            double normalizedY;
+            lock (_mouseSync)
+            {
+                if (!_mouseMovePending)
+                {
+                    _mouseFlushScheduled = false;
+                    return;
+                }
+
+                normalizedX = _pendingMouseX;
+                normalizedY = _pendingMouseY;
+                _mouseMovePending = false;
+            }
+
+            try
+            {
+                await SendMouseMoveAsync(normalizedX, normalizedY);
+            }
+            catch (Exception)
+            {
+                lock (_mouseSync)
+                {
+                    _mouseFlushScheduled = false;
+                }
+
+                return;
+            }
+
+            lock (_mouseSync)
+            {
+                if (!_mouseMovePending)
+                {
+                    _mouseFlushScheduled = false;
+                    return;
+                }
+            }
+        }
     }
 }

@@ -27,6 +27,8 @@ public sealed partial class ViewerPage : Page
     private DateTime _fpsWindowStart = DateTime.UtcNow;
     private bool _isConnected;
     private bool _isPointerCaptured;
+    private (FrameMetadata Metadata, byte[] Jpeg)? _latestFrame;
+    private int _renderInProgress;
 
     public ViewerPage()
     {
@@ -148,21 +150,47 @@ public sealed partial class ViewerPage : Page
         }
     }
 
-    private async void OnFrameReceived(object? sender, (FrameMetadata Metadata, byte[] Jpeg) frame)
+    private void OnFrameReceived(object? sender, (FrameMetadata Metadata, byte[] Jpeg) frame)
     {
         _frameCount++;
-        _sourceWidth = frame.Metadata.Width;
-        _sourceHeight = frame.Metadata.Height;
+        _latestFrame = frame;
+        TryRenderLatestFrame();
+    }
 
-        await DispatcherQueue.EnqueueAsync(async () =>
+    private void TryRenderLatestFrame()
+    {
+        if (Interlocked.CompareExchange(ref _renderInProgress, 1, 0) != 0)
         {
-            using var stream = new InMemoryRandomAccessStream();
-            await stream.WriteAsync(frame.Jpeg.AsBuffer());
-            stream.Seek(0);
+            return;
+        }
 
-            var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(stream);
-            RemoteImage.Source = bitmap;
+        _ = DispatcherQueue.EnqueueAsync(async () =>
+        {
+            try
+            {
+                while (_latestFrame is { } pending)
+                {
+                    _latestFrame = null;
+                    _sourceWidth = pending.Metadata.Width;
+                    _sourceHeight = pending.Metadata.Height;
+
+                    using var stream = new InMemoryRandomAccessStream();
+                    await stream.WriteAsync(pending.Jpeg.AsBuffer());
+                    stream.Seek(0);
+
+                    var bitmap = new BitmapImage();
+                    await bitmap.SetSourceAsync(stream);
+                    RemoteImage.Source = bitmap;
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _renderInProgress, 0);
+                if (_latestFrame is not null)
+                {
+                    TryRenderLatestFrame();
+                }
+            }
         });
     }
 
@@ -210,14 +238,14 @@ public sealed partial class ViewerPage : Page
         }
     }
 
-    private async void RemoteCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
+    private void RemoteCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
         if (!_isConnected || !TryGetNormalized(e.GetCurrentPoint(RemoteCanvas).Position, out var nx, out var ny))
         {
             return;
         }
 
-        await _sessionClient.SendMouseMoveAsync(nx, ny);
+        _sessionClient.QueueMouseMove(nx, ny);
     }
 
     private async void RemoteCanvas_PointerPressed(object sender, PointerRoutedEventArgs e)

@@ -5,8 +5,6 @@ public static class RemoteConstants
     public const int DiscoveryPort = 9847;
     public const int SessionPort = 9848;
     public const string DiscoveryMagic = "RDESK1";
-    public const int TargetFps = 15;
-    public const int JpegQuality = 70;
 }
 
 public enum MessageType : byte

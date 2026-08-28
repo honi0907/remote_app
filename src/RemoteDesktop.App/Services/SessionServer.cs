@@ -8,6 +8,9 @@ public sealed class SessionServer : IAsyncDisposable
 {
     private readonly MessageReader _reader = new();
     private readonly object _clientSync = new();
+    private readonly object _frameSendSync = new();
+    private (FrameMetadata Metadata, byte[] Jpeg)? _latestFrame;
+    private Task? _frameSendTask;
     private TcpListener? _listener;
     private TcpClient? _client;
     private NetworkStream? _stream;
@@ -87,6 +90,11 @@ public sealed class SessionServer : IAsyncDisposable
 
     public async Task SendFrameAsync(FrameMetadata metadata, byte[] jpeg)
     {
+        if (jpeg.Length == 0)
+        {
+            return;
+        }
+
         NetworkStream? stream;
         lock (_clientSync)
         {
@@ -105,6 +113,23 @@ public sealed class SessionServer : IAsyncDisposable
 
         var message = MessageSerializer.BuildFrame(metadata, jpeg);
         await stream.WriteAsync(message);
+    }
+
+    public void QueueFrame(FrameMetadata metadata, byte[] jpeg)
+    {
+        if (jpeg.Length == 0)
+        {
+            return;
+        }
+
+        lock (_frameSendSync)
+        {
+            _latestFrame = (metadata, jpeg);
+            if (_frameSendTask is null || _frameSendTask.IsCompleted)
+            {
+                _frameSendTask = Task.Run(SendLatestFrameLoopAsync);
+            }
+        }
     }
 
     public async Task StopAsync()
@@ -139,6 +164,7 @@ public sealed class SessionServer : IAsyncDisposable
         lock (_clientSync)
         {
             _client = client;
+            client.NoDelay = true;
             _stream = client.GetStream();
             _authenticated = false;
         }
@@ -296,5 +322,36 @@ public sealed class SessionServer : IAsyncDisposable
         }
 
         ClientDisconnected?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task SendLatestFrameLoopAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                (FrameMetadata Metadata, byte[] Jpeg) frame;
+                lock (_frameSendSync)
+                {
+                    if (_latestFrame is null)
+                    {
+                        _frameSendTask = null;
+                        return;
+                    }
+
+                    frame = _latestFrame.Value;
+                    _latestFrame = null;
+                }
+
+                await SendFrameAsync(frame.Metadata, frame.Jpeg);
+            }
+        }
+        catch (Exception)
+        {
+            lock (_frameSendSync)
+            {
+                _frameSendTask = null;
+            }
+        }
     }
 }

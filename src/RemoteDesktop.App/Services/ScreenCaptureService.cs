@@ -89,11 +89,11 @@ public sealed class ScreenCaptureService : IAsyncDisposable
 
         try
         {
-            var metadata = new FrameMetadata(_captureSize.Width, _captureSize.Height, DateTime.UtcNow.Ticks);
-            var jpeg = _frameEncoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
-            if (jpeg.Length > 0)
+            var encoded = _frameEncoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
+            if (encoded.Jpeg.Length > 0)
             {
-                FrameCaptured?.Invoke(this, (metadata, jpeg));
+                var metadata = new FrameMetadata(encoded.Width, encoded.Height, DateTime.UtcNow.Ticks);
+                FrameCaptured?.Invoke(this, (metadata, encoded.Jpeg));
             }
         }
         catch (Exception)
