@@ -1,7 +1,8 @@
 <Page
     x:Class="RemoteDesktop.App.Views.ViewerPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:protocol="using:RemoteDesktop.App.Protocol">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -35,10 +36,10 @@
                     ItemClick="HostListView_ItemClick"
                     MinHeight="180">
                     <ListView.ItemTemplate>
-                        <DataTemplate>
+                        <DataTemplate x:DataType="protocol:DiscoveredHost">
                             <StackPanel Padding="8">
-                                <TextBlock Text="{Binding HostName}" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding Address}" Opacity="0.7" />
+                                <TextBlock Text="{x:Bind HostName}" FontWeight="SemiBold" />
+                                <TextBlock Text="{x:Bind Address}" Opacity="0.7" />
                             </StackPanel>
                         </DataTemplate>
                     </ListView.ItemTemplate>

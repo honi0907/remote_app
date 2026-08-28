@@ -8,9 +8,12 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -24,7 +27,7 @@ jobs:
         run: dotnet run --project tests/ProtocolTests/ProtocolTests.csproj -c Release
 
       - name: Build app
-        run: dotnet build src/RemoteDesktop.App/RemoteDesktop.App.csproj -c Release -p:Platform=x64
+        run: msbuild src/RemoteDesktop.App/RemoteDesktop.App.csproj /restore /t:Build /p:Configuration=Release /p:Platform=x64
 
       - name: Publish app
-        run: dotnet publish src/RemoteDesktop.App/RemoteDesktop.App.csproj -c Release -r win-x64 -p:Platform=x64 --self-contained true -o publish/app
+        run: msbuild src/RemoteDesktop.App/RemoteDesktop.App.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:PublishDir=${{ github.workspace }}/publish/app/

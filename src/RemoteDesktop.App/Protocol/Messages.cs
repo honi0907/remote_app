@@ -61,4 +61,18 @@ public readonly record struct MouseWheelMessage(int Delta, double NormalizedX, d
 
 public readonly record struct KeyMessage(int VirtualKey, KeyAction Action);
 
-public readonly record struct DiscoveredHost(string HostName, string Address, int SessionPort, DateTime LastSeenUtc);
+public sealed class DiscoveredHost
+{
+    public DiscoveredHost(string hostName, string address, int sessionPort, DateTime lastSeenUtc)
+    {
+        HostName = hostName;
+        Address = address;
+        SessionPort = sessionPort;
+        LastSeenUtc = lastSeenUtc;
+    }
+
+    public string HostName { get; }
+    public string Address { get; }
+    public int SessionPort { get; }
+    public DateTime LastSeenUtc { get; }
+}

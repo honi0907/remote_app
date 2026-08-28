@@ -10,9 +10,12 @@ permissions:
 
 jobs:
   release:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -32,16 +35,8 @@ jobs:
           dotnet restore RemoteDesktop.sln
           dotnet run --project tests/ProtocolTests/ProtocolTests.csproj -c Release
 
-      - name: Publish
-        run: |
-          dotnet publish src/RemoteDesktop.App/RemoteDesktop.App.csproj `
-            -c Release `
-            -r win-x64 `
-            -p:Platform=x64 `
-            -p:Version=${{ steps.version.outputs.version }} `
-            -p:InformationalVersion=${{ steps.version.outputs.version }} `
-            --self-contained true `
-            -o publish/app
+      - name: Build
+        run: msbuild src/RemoteDesktop.App/RemoteDesktop.App.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:Version=${{ steps.version.outputs.version }} /p:InformationalVersion=${{ steps.version.outputs.version }} /p:PublishDir=${{ github.workspace }}/publish/app/
 
       - name: Install Inno Setup
         run: choco install innosetup -y
