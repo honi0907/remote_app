@@ -126,13 +126,24 @@ public sealed partial class HostPage : Page
         var settings = new StreamSettings
         {
             Preset = preset,
-            TargetFps = (int)Math.Round(FpsNumberBox.Value),
-            MaxCaptureWidth = (int)Math.Round(MaxWidthNumberBox.Value),
-            JpegQuality = (int)Math.Round(QualityNumberBox.Value),
+            TargetFps = ReadNumberBox(FpsNumberBox, StreamSettings.DefaultResponsiveFps, 10, 30),
+            MaxCaptureWidth = ReadNumberBox(MaxWidthNumberBox, StreamSettings.DefaultResponsiveMaxWidth, 0, 3840),
+            JpegQuality = ReadNumberBox(QualityNumberBox, StreamSettings.DefaultResponsiveJpegQuality, 30, 95),
         };
 
         HostSettingsStore.Save(settings);
         UpdateEffectiveSettingsText();
+    }
+
+    private static int ReadNumberBox(NumberBox box, int fallback, int min, int max)
+    {
+        var value = box.Value;
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return fallback;
+        }
+
+        return Math.Clamp((int)Math.Round(value), min, max);
     }
 
     private void UpdateEffectiveSettingsText()

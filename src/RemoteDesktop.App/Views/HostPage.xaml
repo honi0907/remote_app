@@ -48,6 +48,7 @@
                             Header="FPS（10〜30）"
                             Minimum="10"
                             Maximum="30"
+                            Value="24"
                             SpinButtonPlacementMode="Inline"
                             ValueChanged="ManualSetting_ValueChanged" />
                         <NumberBox
@@ -55,6 +56,7 @@
                             Header="最大幅（0 = フル解像度）"
                             Minimum="0"
                             Maximum="3840"
+                            Value="1280"
                             SpinButtonPlacementMode="Inline"
                             ValueChanged="ManualSetting_ValueChanged" />
                         <NumberBox
@@ -62,6 +64,7 @@
                             Header="JPEG 品質（30〜95）"
                             Minimum="30"
                             Maximum="95"
+                            Value="55"
                             SpinButtonPlacementMode="Inline"
                             ValueChanged="ManualSetting_ValueChanged" />
                     </StackPanel>
