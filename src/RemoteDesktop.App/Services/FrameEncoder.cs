@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using RemoteDesktop.App.Protocol;
 using Windows.Graphics.DirectX.Direct3D11;
 using Windows.Graphics.Imaging;
@@ -49,11 +50,11 @@ public sealed class FrameEncoder : IDisposable
         encoder.SetSoftwareBitmap(bitmap);
         encoder.IsThumbnailGenerated = false;
         encoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Linear;
-        _ = encoder.FlushAsync().AsTask().GetAwaiter().GetResult();
+        encoder.FlushAsync().AsTask().GetAwaiter().GetResult();
 
         stream.Seek(0);
         var output = new byte[stream.Size];
-        _ = stream.ReadAsync(output.AsBuffer(), (uint)output.Length, InputStreamOptions.None).AsTask().GetAwaiter().GetResult();
+        stream.ReadAsync(output.AsBuffer(), (uint)output.Length, InputStreamOptions.None).AsTask().GetAwaiter().GetResult();
         return output;
     }
 }

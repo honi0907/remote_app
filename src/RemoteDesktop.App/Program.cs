@@ -13,7 +13,7 @@ public static class Program
         {
             var dispatcherQueue = DispatcherQueue.GetForCurrentThread();
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(dispatcherQueue));
-            _ = new App();
+            new App();
         });
     }
 }

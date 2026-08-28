@@ -124,17 +124,19 @@ internal static class MonitorHelper
     public static IntPtr GetPrimaryMonitorHandle()
     {
         IntPtr primary = IntPtr.Zero;
-        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (hMonitor, _, _, _) =>
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, MonitorEnumCallback, IntPtr.Zero);
+        return primary;
+
+        bool MonitorEnumCallback(IntPtr hMonitor, IntPtr _, ref Rect __, IntPtr ___)
         {
             primary = hMonitor;
             return false;
-        }, IntPtr.Zero);
-        return primary;
+        }
     }
 
     public static GraphicsCaptureItem CreateItemForMonitor(IntPtr monitorHandle)
     {
-        var interop = (IGraphicsCaptureItemInterop)ActivationFactory.Get(typeof(GraphicsCaptureItem));
+        var interop = (IGraphicsCaptureItemInterop)ActivationFactory.Get(typeof(GraphicsCaptureItem).FullName!);
         var itemGuid = typeof(GraphicsCaptureItem).GUID;
         var itemPointer = interop.CreateForMonitor(monitorHandle, ref itemGuid);
         return GraphicsCaptureItem.FromAbi(itemPointer);
@@ -198,7 +200,11 @@ internal static class Direct3DHelper
 
         try
         {
-            Marshal.QueryInterface(d3dDevice, in DxgiDeviceGuid, out var dxgiDevice).ThrowIfFailed();
+            var queryHr = Marshal.QueryInterface(d3dDevice, in DxgiDeviceGuid, out var dxgiDevice);
+            if (queryHr < 0)
+            {
+                throw new COMException("QueryInterface for IDXGIDevice failed.", queryHr);
+            }
             try
             {
                 var createHr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out var winRtDevice);

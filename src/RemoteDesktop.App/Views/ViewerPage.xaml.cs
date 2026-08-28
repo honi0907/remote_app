@@ -7,9 +7,9 @@ using Microsoft.UI.Xaml.Navigation;
 using RemoteDesktop.App.Helpers;
 using RemoteDesktop.App.Protocol;
 using RemoteDesktop.App.Services;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
 using Windows.Storage.Streams;
-using Windows.System;
 using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace RemoteDesktop.App.Views;
@@ -31,11 +31,11 @@ public sealed partial class ViewerPage : Page
     public ViewerPage()
     {
         InitializeComponent();
-        _pingTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _pingTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _pingTimer.Interval = TimeSpan.FromSeconds(2);
         _pingTimer.Tick += PingTimer_Tick;
 
-        _fpsTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _fpsTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _fpsTimer.Interval = TimeSpan.FromSeconds(1);
         _fpsTimer.Tick += FpsTimer_Tick;
 
