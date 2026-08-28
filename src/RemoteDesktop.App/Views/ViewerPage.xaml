@@ -62,14 +62,14 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <CommandBar DefaultLabelLocation="Right">
+                <CommandBar>
                     <AppBarButton Icon="Cancel" Label="切断" Click="DisconnectButton_Click" />
                 </CommandBar>
                 <Grid
                     x:Name="RemoteCanvas"
                     Grid.Row="1"
                     Background="Black"
-                    Focusable="True"
+                    IsTabStop="True"
                     KeyDown="RemoteCanvas_KeyDown"
                     KeyUp="RemoteCanvas_KeyUp"
                     PointerMoved="RemoteCanvas_PointerMoved"
