@@ -28,12 +28,12 @@ public sealed partial class HomePage : Page
         }
     }
 
-    private async void HostButton_Click(object sender, RoutedEventArgs e)
+    private void HostButton_Click(object sender, RoutedEventArgs e)
     {
         Frame.Navigate(typeof(HostPage));
     }
 
-    private async void ViewerButton_Click(object sender, RoutedEventArgs e)
+    private void ViewerButton_Click(object sender, RoutedEventArgs e)
     {
         Frame.Navigate(typeof(ViewerPage));
     }
