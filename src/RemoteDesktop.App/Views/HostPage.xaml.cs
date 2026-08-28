@@ -23,7 +23,7 @@ public sealed partial class HostPage : Page
     public HostPage()
     {
         InitializeComponent();
-        _firewallTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _firewallTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _firewallTimer.Interval = TimeSpan.FromSeconds(2);
         _firewallTimer.Tick += FirewallTimer_Tick;
 
@@ -63,20 +63,23 @@ public sealed partial class HostPage : Page
         base.OnNavigatedFrom(e);
     }
 
-    private async void OnClientConnectionRequested(object? sender, string viewerName)
+    private void OnClientConnectionRequested(object? sender, string viewerName)
     {
-        var dialog = new ContentDialog
+        _ = DispatcherQueue.EnqueueAsync(async () =>
         {
-            Title = "接続リクエスト",
-            Content = $"{viewerName} から接続要求があります。許可しますか？",
-            PrimaryButtonText = "許可",
-            CloseButtonText = "拒否",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot,
-        };
+            var dialog = new ContentDialog
+            {
+                Title = "接続リクエスト",
+                Content = $"{viewerName} から接続要求があります。許可しますか？",
+                PrimaryButtonText = "許可",
+                CloseButtonText = "拒否",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = XamlRoot,
+            };
 
-        var result = await dialog.ShowAsync();
-        await _sessionServer.ApprovePendingClientAsync(result == ContentDialogResult.Primary);
+            var result = await dialog.ShowAsync();
+            await _sessionServer.ApprovePendingClientAsync(result == ContentDialogResult.Primary);
+        });
     }
 
     private async void OnClientConnected(object? sender, EventArgs e)
