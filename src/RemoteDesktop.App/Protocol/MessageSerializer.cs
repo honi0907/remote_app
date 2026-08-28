@@ -95,13 +95,13 @@ public static class MessageSerializer
     }
 
     public static string ParseAuthRequest(ReadOnlySpan<byte> payload) =>
-        Encoding.UTF8.GetString(Payload(payload));
+        ParseStringPayload(payload);
 
     public static AuthResult ParseAuthResponse(ReadOnlySpan<byte> payload) =>
         Payload(payload).Length > 0 ? (AuthResult)Payload(payload)[0] : AuthResult.InvalidPin;
 
     public static string ParseConnectionRequest(ReadOnlySpan<byte> payload) =>
-        Encoding.UTF8.GetString(Payload(payload));
+        ParseStringPayload(payload);
 
     public static ConnectionResponseKind ParseConnectionResponse(ReadOnlySpan<byte> payload) =>
         Payload(payload).Length > 0 ? (ConnectionResponseKind)Payload(payload)[0] : ConnectionResponseKind.Rejected;
@@ -154,6 +154,23 @@ public static class MessageSerializer
 
     public static long ParseTimestamp(ReadOnlySpan<byte> payload) =>
         BinaryPrimitives.ReadInt64LittleEndian(Payload(payload));
+
+    private static string ParseStringPayload(ReadOnlySpan<byte> buffer)
+    {
+        var body = Payload(buffer);
+        if (body.Length < 4)
+        {
+            return string.Empty;
+        }
+
+        var length = BinaryPrimitives.ReadInt32LittleEndian(body[..4]);
+        if (length < 0 || body.Length < 4 + length)
+        {
+            return string.Empty;
+        }
+
+        return Encoding.UTF8.GetString(body.Slice(4, length));
+    }
 
     private static byte[] BuildStringPayload(MessageType type, string value)
     {

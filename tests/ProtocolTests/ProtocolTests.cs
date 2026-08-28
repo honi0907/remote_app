@@ -7,11 +7,35 @@ public static class ProtocolTests
 {
     public static void RunAll()
     {
+        TestAuthRoundTrip();
+        TestConnectionRequestRoundTrip();
         TestMouseMoveRoundTrip();
         TestFrameRoundTrip();
         TestMessageReader();
         TestCoordinateMapper();
         Console.WriteLine("All protocol tests passed.");
+    }
+
+    private static void TestAuthRoundTrip()
+    {
+        const string pin = "362704";
+        var bytes = MessageSerializer.BuildAuthRequest(pin);
+        var parsed = MessageSerializer.ParseAuthRequest(bytes);
+        if (!string.Equals(parsed, pin, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Auth round-trip failed. Expected '{pin}', got '{parsed}'.");
+        }
+    }
+
+    private static void TestConnectionRequestRoundTrip()
+    {
+        const string viewerName = "DESKTOP-1EK40GL";
+        var bytes = MessageSerializer.BuildConnectionRequest(viewerName);
+        var parsed = MessageSerializer.ParseConnectionRequest(bytes);
+        if (!string.Equals(parsed, viewerName, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Connection request round-trip failed. Expected '{viewerName}', got '{parsed}'.");
+        }
     }
 
     private static void TestMouseMoveRoundTrip()
