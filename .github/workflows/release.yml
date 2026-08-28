@@ -36,7 +36,7 @@ jobs:
           dotnet run --project tests/ProtocolTests/ProtocolTests.csproj -c Release
 
       - name: Build
-        run: msbuild src/RemoteDesktop.App/RemoteDesktop.App.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:Version=${{ steps.version.outputs.version }} /p:InformationalVersion=${{ steps.version.outputs.version }} /p:PublishDir=${{ github.workspace }}/publish/app/
+        run: msbuild src/RemoteDesktop.App/RemoteDesktop.App.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:PublishTrimmed=false /p:PublishSingleFile=false /p:Version=${{ steps.version.outputs.version }} /p:InformationalVersion=${{ steps.version.outputs.version }} /p:PublishDir=${{ github.workspace }}/publish/app/
 
       - name: Install Inno Setup
         run: choco install innosetup -y

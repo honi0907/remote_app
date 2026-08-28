@@ -23,6 +23,9 @@ try {
         -p:Platform=x64 `
         -p:Version=$Version `
         -p:InformationalVersion=$Version `
+        -p:WindowsAppSDKSelfContained=true `
+        -p:PublishTrimmed=false `
+        -p:PublishSingleFile=false `
         --self-contained true `
         -o $publishDir
 
