@@ -57,6 +57,7 @@ public sealed partial class ViewerPage : Page
         _discovery.HostsChanged += OnHostsChanged;
         _sessionClient.StreamFrameReceived += OnStreamFrameReceived;
         _sessionClient.StreamConfigReceived += OnStreamConfigReceived;
+        _sessionClient.StreamStatusReceived += OnStreamStatusReceived;
         _sessionClient.LatencyMeasured += OnLatencyMeasured;
         _sessionClient.Disconnected += OnDisconnected;
     }
@@ -163,6 +164,11 @@ public sealed partial class ViewerPage : Page
             StatusText.Text = ex.Message;
             await ShowErrorAsync(ex.Message);
         }
+    }
+
+    private void OnStreamStatusReceived(object? sender, string status)
+    {
+        _ = DispatcherQueue.EnqueueAsync(() => SetDiagnostic($"ホスト: {status}"));
     }
 
     private void OnStreamConfigReceived(object? sender, StreamConfigMessage config)

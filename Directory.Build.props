@@ -1,9 +1,9 @@
 <Project>
   <PropertyGroup>
-    <Version>1.1.4</Version>
-    <AssemblyVersion>1.1.4.0</AssemblyVersion>
-    <FileVersion>1.1.4.0</FileVersion>
-    <InformationalVersion>1.1.4</InformationalVersion>
+    <Version>1.1.5</Version>
+    <AssemblyVersion>1.1.5.0</AssemblyVersion>
+    <FileVersion>1.1.5.0</FileVersion>
+    <InformationalVersion>1.1.5</InformationalVersion>
     <Company>Remote Desktop LAN</Company>
     <Product>Remote Desktop LAN</Product>
     <Copyright>Copyright © 2026</Copyright>

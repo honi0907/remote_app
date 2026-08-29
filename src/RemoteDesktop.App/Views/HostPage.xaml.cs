@@ -15,6 +15,7 @@ public sealed partial class HostPage : Page
     private readonly SessionServer _sessionServer = new();
     private readonly ScreenCaptureService _screenCapture = new();
     private readonly DispatcherQueueTimer _firewallTimer;
+    private readonly DispatcherQueueTimer _diagnosticsTimer;
     private CancellationTokenSource? _cts;
     private string _pin = string.Empty;
     private int _frameCount;
@@ -27,6 +28,10 @@ public sealed partial class HostPage : Page
         _firewallTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _firewallTimer.Interval = TimeSpan.FromSeconds(2);
         _firewallTimer.Tick += FirewallTimer_Tick;
+
+        _diagnosticsTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _diagnosticsTimer.Interval = TimeSpan.FromSeconds(1);
+        _diagnosticsTimer.Tick += DiagnosticsTimer_Tick;
 
         _sessionServer.ClientConnectionRequested += OnClientConnectionRequested;
         _sessionServer.ClientConnected += OnClientConnected;
@@ -56,6 +61,7 @@ public sealed partial class HostPage : Page
     protected override async void OnNavigatedFrom(NavigationEventArgs e)
     {
         _firewallTimer.Stop();
+        _diagnosticsTimer.Stop();
         _cts?.Cancel();
         _screenCapture.FrameCaptured -= OnFrameCaptured;
         await _screenCapture.DisposeAsync();
@@ -239,6 +245,7 @@ public sealed partial class HostPage : Page
                     : $"クライアント接続済み - 画面共有中 ({codecLabel})";
                 ConnectedClientText.Text = "接続中のクライアント: 1";
                 DiagnosticText.Text = $"診断: 配信開始 codec={_screenCapture.ActiveCodec} capture={_screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight}";
+                _diagnosticsTimer.Start();
             }
             catch (Exception ex)
             {
@@ -266,6 +273,7 @@ public sealed partial class HostPage : Page
             ConnectedClientText.Text = "接続中のクライアント: なし";
             FpsText.Text = "FPS: --";
             DiagnosticText.Text = "診断: 待機中";
+            _diagnosticsTimer.Stop();
             await _screenCapture.StopAsync();
         });
     }
@@ -294,6 +302,41 @@ public sealed partial class HostPage : Page
                     ? $"診断: 送信 {frame.Codec} {frame.Metadata.Width}x{frame.Metadata.Height} {frame.Payload.Length}B key={frame.IsKeyframe}"
                     : $"診断: エンコードエラー {encodeError}";
             });
+        }
+    }
+
+    private async void DiagnosticsTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        var status =
+            $"host codec={_screenCapture.ActiveCodec} { _screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight} " +
+            $"try={_screenCapture.EncodeAttempts} ok={_screenCapture.EncodeSuccesses} empty={_screenCapture.EncodeEmpties} " +
+            $"err={_screenCapture.LastEncodeError ?? "-"}";
+        DiagnosticText.Text = $"診断: {status}";
+
+        if (_sessionServer.HasAuthenticatedClient)
+        {
+            try
+            {
+                await _sessionServer.SendStreamStatusAsync(status);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        if (_screenCapture.ActiveCodec == StreamCodec.H264 &&
+            _screenCapture.EncodeSuccesses == 0 &&
+            _screenCapture.EncodeAttempts >= 40)
+        {
+            _screenCapture.FallbackToJpeg("H.264がフレームを出せないためJPEGへ切替");
+            try
+            {
+                await _sessionServer.SendStreamConfigAsync(_screenCapture.CreateStreamConfig());
+                StatusText.Text = "クライアント接続済み - JPEG配信中（H.264送信失敗のため切替）";
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 

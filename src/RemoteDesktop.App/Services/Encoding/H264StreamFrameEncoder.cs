@@ -2,7 +2,6 @@ using RemoteDesktop.App.Protocol;
 using RemoteDesktop.App.Services;
 using RemoteDesktop.App.Services.StreamEncoding.H264;
 using Windows.Graphics.DirectX.Direct3D11;
-using Windows.Graphics.Imaging;
 
 namespace RemoteDesktop.App.Services.StreamEncoding;
 
@@ -43,8 +42,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
             EnsureEncoder(width, height, settings.TargetFps);
 
             using var bitmap = SurfaceBitmapHelper.CopySurfaceToBitmap(surface);
-            using var scaledBitmap = ScaleBitmap(bitmap, width, height);
-            var bgra = SurfaceBitmapHelper.ExtractBgra(scaledBitmap);
+            var bgra = ScaleBgra(SurfaceBitmapHelper.ExtractBgra(bitmap), bitmap.PixelWidth, bitmap.PixelHeight, width, height);
             var nv12 = Nv12Converter.BgraToNv12(bgra, width, height);
             var (payload, isKeyframe) = _encoder.EncodeNv12(nv12);
             if (payload.Length == 0)
@@ -89,27 +87,30 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
         return (int)Math.Clamp(pixels * fps / 120_000, 2_000, 12_000);
     }
 
-    private static SoftwareBitmap ScaleBitmap(SoftwareBitmap bitmap, int width, int height)
+    private static byte[] ScaleBgra(byte[] source, int sourceWidth, int sourceHeight, int width, int height)
     {
-        if (bitmap.PixelWidth == width && bitmap.PixelHeight == height)
+        if (sourceWidth == width && sourceHeight == height)
         {
-            return SoftwareBitmap.Copy(bitmap);
+            return source;
         }
 
-        using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-        var encoder = BitmapEncoder.CreateAsync(BitmapEncoder.BmpEncoderId, stream).AsTask().GetAwaiter().GetResult();
-        encoder.SetSoftwareBitmap(bitmap);
-        encoder.BitmapTransform.ScaledWidth = (uint)width;
-        encoder.BitmapTransform.ScaledHeight = (uint)height;
-        encoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Linear;
-        encoder.FlushAsync().AsTask().GetAwaiter().GetResult();
+        var destination = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        {
+            var sourceY = Math.Min(sourceHeight - 1, y * sourceHeight / height);
+            for (var x = 0; x < width; x++)
+            {
+                var sourceX = Math.Min(sourceWidth - 1, x * sourceWidth / width);
+                var sourceIndex = (sourceY * sourceWidth + sourceX) * 4;
+                var destIndex = (y * width + x) * 4;
+                destination[destIndex] = source[sourceIndex];
+                destination[destIndex + 1] = source[sourceIndex + 1];
+                destination[destIndex + 2] = source[sourceIndex + 2];
+                destination[destIndex + 3] = source[sourceIndex + 3];
+            }
+        }
 
-        stream.Seek(0);
-        var decoder = BitmapDecoder.CreateAsync(stream).AsTask().GetAwaiter().GetResult();
-        return decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied)
-            .AsTask()
-            .GetAwaiter()
-            .GetResult();
+        return destination;
     }
 
     private static int AlignEven(int value) => Math.Max(2, value - (value & 1));

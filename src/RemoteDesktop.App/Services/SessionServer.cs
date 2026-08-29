@@ -94,6 +94,11 @@ public sealed class SessionServer : IAsyncDisposable
         await WriteAsync(MessageSerializer.BuildStreamConfig(config));
     }
 
+    public async Task SendStreamStatusAsync(string text)
+    {
+        await WriteAsync(MessageSerializer.BuildStreamStatus(text));
+    }
+
     public async Task SendFrameAsync(EncodedStreamFrame frame)
     {
         if (frame.Payload.Length == 0)

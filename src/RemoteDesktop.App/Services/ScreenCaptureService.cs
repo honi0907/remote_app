@@ -14,6 +14,7 @@ namespace RemoteDesktop.App.Services;
 
 public sealed class ScreenCaptureService : IAsyncDisposable
 {
+    private readonly object _encoderSync = new();
     private IStreamFrameEncoder? _frameEncoder;
     private StreamCodec _activeCodec = StreamCodec.Jpeg;
     private GraphicsCaptureItem? _captureItem;
@@ -27,13 +28,39 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     public int CaptureHeight => _captureSize.Height;
     public StreamCodec ActiveCodec => _activeCodec;
     public string? LastEncodeError { get; private set; }
+    public int EncodeAttempts { get; private set; }
+    public int EncodeEmpties { get; private set; }
+    public int EncodeSuccesses { get; private set; }
 
     public event EventHandler<EncodedStreamFrame>? FrameCaptured;
 
     public void ConfigureEncoder(StreamDeliveryMode deliveryMode)
     {
-        _frameEncoder?.Dispose();
-        _frameEncoder = StreamFrameEncoderFactory.Create(deliveryMode, out _activeCodec);
+        lock (_encoderSync)
+        {
+            _frameEncoder?.Dispose();
+            _frameEncoder = StreamFrameEncoderFactory.Create(deliveryMode, out _activeCodec);
+            EncodeAttempts = 0;
+            EncodeEmpties = 0;
+            EncodeSuccesses = 0;
+            LastEncodeError = null;
+        }
+    }
+
+    public void FallbackToJpeg(string reason)
+    {
+        lock (_encoderSync)
+        {
+            if (_activeCodec == StreamCodec.Jpeg)
+            {
+                return;
+            }
+
+            _frameEncoder?.Dispose();
+            _frameEncoder = new JpegStreamFrameEncoder();
+            _activeCodec = StreamCodec.Jpeg;
+            LastEncodeError = reason;
+        }
     }
 
     public StreamConfigMessage CreateStreamConfig()
@@ -104,22 +131,35 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
     {
         using var frame = sender.TryGetNextFrame();
-        if (frame is null || _frameEncoder is null)
+        IStreamFrameEncoder? encoder;
+        lock (_encoderSync)
+        {
+            encoder = _frameEncoder;
+        }
+
+        if (frame is null || encoder is null)
         {
             return;
         }
 
         try
         {
-            var encoded = _frameEncoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
+            EncodeAttempts++;
+            var encoded = encoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
             if (encoded.Payload.Length > 0)
             {
+                EncodeSuccesses++;
                 LastEncodeError = null;
                 FrameCaptured?.Invoke(this, encoded);
+            }
+            else
+            {
+                EncodeEmpties++;
             }
         }
         catch (Exception ex)
         {
+            EncodeEmpties++;
             LastEncodeError = ex.Message;
         }
     }

@@ -20,6 +20,7 @@ public sealed class SessionClient : IAsyncDisposable
 
     public event EventHandler<EncodedStreamFrame>? StreamFrameReceived;
     public event EventHandler<StreamConfigMessage>? StreamConfigReceived;
+    public event EventHandler<string>? StreamStatusReceived;
     public event EventHandler<long>? LatencyMeasured;
     public event EventHandler? Disconnected;
     public event EventHandler<ConnectionResponseKind>? ConnectionResponseReceived;
@@ -202,6 +203,10 @@ public sealed class SessionClient : IAsyncDisposable
 
             case MessageType.StreamConfig:
                 StreamConfigReceived?.Invoke(this, MessageSerializer.ParseStreamConfig(message));
+                break;
+
+            case MessageType.StreamStatus:
+                StreamStatusReceived?.Invoke(this, MessageSerializer.ParseStreamStatus(message));
                 break;
 
             case MessageType.Frame:
