@@ -6,6 +6,49 @@ internal static class Nv12Converter
 
     public static int GetBufferSize(int width, int height) => GetStride(width) * height * 3 / 2;
 
+    public static bool TryResolveDimensions(
+        int bufferLength,
+        int preferredWidth,
+        int preferredHeight,
+        int fallbackWidth,
+        int fallbackHeight,
+        out int width,
+        out int height)
+    {
+        foreach (var (candidateWidth, candidateHeight) in new[]
+                 {
+                     (preferredWidth, preferredHeight),
+                     (fallbackWidth, fallbackHeight),
+                 })
+        {
+            if (candidateWidth > 0 &&
+                candidateHeight > 0 &&
+                bufferLength == GetBufferSize(candidateWidth, candidateHeight))
+            {
+                width = candidateWidth;
+                height = candidateHeight;
+                return true;
+            }
+        }
+
+        var widthGuess = preferredWidth > 0 ? preferredWidth : fallbackWidth;
+        if (widthGuess > 0)
+        {
+            var stride = GetStride(widthGuess);
+            var heightGuess = bufferLength * 2 / (stride * 3);
+            if (heightGuess > 0 && bufferLength == GetBufferSize(widthGuess, heightGuess))
+            {
+                width = widthGuess;
+                height = heightGuess;
+                return true;
+            }
+        }
+
+        width = fallbackWidth;
+        height = fallbackHeight;
+        return width > 0 && height > 0;
+    }
+
     public static byte[] BgraToNv12(byte[] bgra, int width, int height)
     {
         var stride = GetStride(width);

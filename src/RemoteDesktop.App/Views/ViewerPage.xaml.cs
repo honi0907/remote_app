@@ -10,6 +10,7 @@ using RemoteDesktop.App.Services;
 using RemoteDesktop.App.Services.StreamEncoding;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
+using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
@@ -29,8 +30,9 @@ public sealed partial class ViewerPage : Page
     private DateTime _fpsWindowStart = DateTime.UtcNow;
     private bool _isConnected;
     private bool _isPointerCaptured;
-    private (FrameMetadata Metadata, byte[] Payload, StreamCodec Codec)? _latestFrame;
+    private (FrameMetadata Metadata, byte[] Payload, StreamCodec Codec, bool IsKeyframe)? _latestFrame;
     private int _renderInProgress;
+    private int _h264DecodeFailures;
     private StreamCodec _activeCodec = StreamCodec.Jpeg;
 
     public ViewerPage()
@@ -158,12 +160,14 @@ public sealed partial class ViewerPage : Page
     private void OnStreamConfigReceived(object? sender, StreamConfigMessage config)
     {
         _activeCodec = config.Codec;
+        _h264Decoder.Reset();
+        _h264DecodeFailures = 0;
     }
 
     private void OnStreamFrameReceived(object? sender, EncodedStreamFrame frame)
     {
         _frameCount++;
-        _latestFrame = (frame.Metadata, frame.Payload, frame.Codec);
+        _latestFrame = (frame.Metadata, frame.Payload, frame.Codec, frame.IsKeyframe);
         TryRenderLatestFrame();
     }
 
@@ -186,31 +190,28 @@ public sealed partial class ViewerPage : Page
 
                     if (pending.Codec == StreamCodec.H264)
                     {
-                        var encoded = new EncodedStreamFrame(StreamCodec.H264, pending.Metadata, pending.Payload, true);
-                        var bgra = _h264Decoder.Decode(encoded);
-                        if (bgra.Length == 0)
+                        var encoded = new EncodedStreamFrame(
+                            StreamCodec.H264,
+                            pending.Metadata,
+                            pending.Payload,
+                            pending.IsKeyframe);
+                        var decoded = _h264Decoder.Decode(encoded);
+                        if (decoded.IsEmpty)
                         {
+                            _h264DecodeFailures++;
+                            if (_h264DecodeFailures <= 3)
+                            {
+                                StatusText.Text = "H.264 デコード待機中…";
+                            }
+
                             continue;
                         }
 
-                        var width = pending.Metadata.Width;
-                        var height = pending.Metadata.Height;
-                        var bitmap = new WriteableBitmap(width, height);
-                        var pixelBuffer = bitmap.PixelBuffer;
-                        var destStride = width * 4;
-                        using (var stream = pixelBuffer.AsStream())
-                        {
-                            if (destStride == width * 4)
-                            {
-                                for (var row = 0; row < height; row++)
-                                {
-                                    stream.Write(bgra, row * destStride, destStride);
-                                }
-                            }
-                        }
-
-                        bitmap.Invalidate();
-                        RemoteImage.Source = bitmap;
+                        _h264DecodeFailures = 0;
+                        _sourceWidth = decoded.Width;
+                        _sourceHeight = decoded.Height;
+                        StatusText.Text = "接続済み";
+                        await ShowH264FrameAsync(decoded.Bgra, decoded.Width, decoded.Height);
                     }
                     else
                     {
@@ -233,6 +234,19 @@ public sealed partial class ViewerPage : Page
                 }
             }
         });
+    }
+
+    private async Task ShowH264FrameAsync(byte[] bgra, int width, int height)
+    {
+        using var softwareBitmap = SoftwareBitmap.CreateCopyFromBuffer(
+            bgra.AsBuffer(),
+            BitmapPixelFormat.Bgra8,
+            width,
+            height,
+            BitmapAlphaMode.Ignore);
+        var source = new SoftwareBitmapSource();
+        await source.SetBitmapAsync(softwareBitmap);
+        RemoteImage.Source = source;
     }
 
     private void OnLatencyMeasured(object? sender, long latencyMs)

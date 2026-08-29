@@ -33,10 +33,10 @@ if (encoded is null)
 using var decoder = new H264StreamFrameDecoder();
 var frame = new EncodedStreamFrame(StreamCodec.H264, new FrameMetadata(width, height, DateTime.UtcNow.Ticks), encoded, true);
 var decoded = decoder.Decode(frame);
-var nonZero = decoded.Count(b => b != 0);
-Console.WriteLine($"Decode: {decoded.Length} bytes, nonZero={nonZero}");
+var nonZero = decoded.Bgra.Count(b => b != 0);
+Console.WriteLine($"Decode: {decoded.Bgra.Length} bytes ({decoded.Width}x{decoded.Height}), nonZero={nonZero}");
 
-if (decoded.Length != width * height * 4 || nonZero < 1000)
+if (decoded.Bgra.Length != width * height * 4 || nonZero < 1000)
 {
     Console.Error.WriteLine("FAIL: H.264 roundtrip.");
     return 1;

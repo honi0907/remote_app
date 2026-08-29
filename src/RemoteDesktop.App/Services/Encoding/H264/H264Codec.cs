@@ -114,7 +114,7 @@ internal sealed class H264Decoder : IDisposable
     private IMFTransform? _transform;
     private bool _outputConfigured;
 
-    public byte[] Decode(byte[] bitstream, int width, int height)
+    public (byte[] Bgra, int Width, int Height) Decode(byte[] bitstream, int frameWidth, int frameHeight)
     {
         EnsureTransform();
 
@@ -132,14 +132,29 @@ internal sealed class H264Decoder : IDisposable
                     var output = MediaFoundationTransformHelper.ProcessOutput(
                         _transform!,
                         ref _outputConfigured,
-                        out _,
-                        out _);
+                        out var outputWidth,
+                        out var outputHeight);
                     if (output is null || output.Length == 0)
                     {
                         continue;
                     }
 
-                    return Nv12Converter.Nv12ToBgra(output, width, height);
+                    var width = outputWidth;
+                    var height = outputHeight;
+                    if (!Nv12Converter.TryResolveDimensions(
+                            output.Length,
+                            outputWidth,
+                            outputHeight,
+                            frameWidth,
+                            frameHeight,
+                            out width,
+                            out height))
+                    {
+                        continue;
+                    }
+
+                    var bgra = Nv12Converter.Nv12ToBgra(output, width, height);
+                    return (bgra, width, height);
                 }
                 catch (SharpGenException ex) when (MediaFoundationTransformHelper.IsNeedMoreInput(ex.HResult))
                 {
@@ -148,7 +163,7 @@ internal sealed class H264Decoder : IDisposable
             }
         }
 
-        return [];
+        return ([], 0, 0);
     }
 
     public void Dispose()

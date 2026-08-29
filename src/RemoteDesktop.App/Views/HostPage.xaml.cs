@@ -233,7 +233,10 @@ public sealed partial class HostPage : Page
                 await _screenCapture.StartAsync(_cts?.Token ?? CancellationToken.None);
 
                 var codecLabel = _screenCapture.ActiveCodec == StreamCodec.H264 ? "H.264" : "JPEG";
-                StatusText.Text = $"クライアント接続済み - 画面共有中 ({codecLabel})";
+                StatusText.Text = settings.DeliveryMode is StreamDeliveryMode.H264 or StreamDeliveryMode.H265
+                    && _screenCapture.ActiveCodec == StreamCodec.Jpeg
+                    ? $"クライアント接続済み - JPEG配信中（H.264はMedia Foundation未対応）"
+                    : $"クライアント接続済み - 画面共有中 ({codecLabel})";
                 ConnectedClientText.Text = "接続中のクライアント: 1";
             }
             catch (Exception ex)
