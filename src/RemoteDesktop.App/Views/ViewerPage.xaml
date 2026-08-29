@@ -3,14 +3,14 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:protocol="using:RemoteDesktop.App.Protocol">
-    <Grid>
+    <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition x:Name="HeaderRow" Height="Auto" />
+            <RowDefinition x:Name="DiagnosticRow" Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid Padding="16,12">
+        <Grid x:Name="HeaderBar" Grid.Row="0" Padding="16,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="12" />
@@ -26,7 +26,7 @@
             <TextBlock Grid.Column="6" x:Name="FpsText" Text="FPS: --" VerticalAlignment="Center" Opacity="0.8" />
         </Grid>
 
-        <StackPanel Grid.Row="1" Padding="16,0,16,8" Spacing="4">
+        <StackPanel x:Name="DiagnosticBar" Grid.Row="1" Padding="16,0,16,8" Spacing="4">
             <TextBlock
                 x:Name="DiagnosticText"
                 TextWrapping="Wrap"
@@ -70,20 +70,11 @@
             </StackPanel>
 
             <Grid x:Name="RemotePanel" Visibility="Collapsed">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <CommandBar>
-                    <AppBarButton Icon="Cancel" Label="切断" Click="DisconnectButton_Click" />
-                </CommandBar>
                 <Grid
                     x:Name="RemoteCanvas"
-                    Grid.Row="1"
                     Background="Black"
                     IsTabStop="True"
-                    KeyDown="RemoteCanvas_KeyDown"
-                    KeyUp="RemoteCanvas_KeyUp"
+                    PointerEntered="RemoteCanvas_PointerEntered"
                     PointerMoved="RemoteCanvas_PointerMoved"
                     PointerPressed="RemoteCanvas_PointerPressed"
                     PointerReleased="RemoteCanvas_PointerReleased"
@@ -95,6 +86,16 @@
                         VerticalAlignment="Center"
                         IsHitTestVisible="False" />
                 </Grid>
+                <Border
+                    x:Name="RemoteOverlayBar"
+                    VerticalAlignment="Top"
+                    Background="#CC000000">
+                    <CommandBar Background="Transparent" DefaultLabelPosition="Right">
+                        <AppBarButton Icon="Cancel" Label="切断" Click="DisconnectButton_Click" />
+                        <AppBarButton Label="フル画面解除" Click="ExitFullscreenButton_Click" />
+                        <AppBarButton Label="フル画面" Click="EnterFullscreenButton_Click" />
+                    </CommandBar>
+                </Border>
             </Grid>
         </Grid>
     </Grid>

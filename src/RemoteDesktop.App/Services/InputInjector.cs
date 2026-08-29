@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using RemoteDesktop.App.Helpers;
 using RemoteDesktop.App.Protocol;
 
 namespace RemoteDesktop.App.Services;
@@ -54,6 +55,7 @@ public static class InputInjector
 
     public static void SendKey(int virtualKey, KeyAction action)
     {
+        var spec = VirtualKeyMapper.ToKeyboardInput(virtualKey, action);
         var input = new Input
         {
             Type = InputKeyboard,
@@ -61,9 +63,9 @@ public static class InputInjector
             {
                 Ki = new KeyboardInput
                 {
-                    VirtualKey = (ushort)virtualKey,
-                    Scan = 0,
-                    Flags = action == KeyAction.Up ? KeyboardEventFlags.KeyUp : 0,
+                    VirtualKey = spec.VirtualKey,
+                    Scan = spec.Scan,
+                    Flags = spec.Flags,
                     Time = 0,
                     ExtraInfo = IntPtr.Zero,
                 },
@@ -151,8 +153,12 @@ public static class InputInjector
     }
 
     [Flags]
-    private enum KeyboardEventFlags : uint
+    public enum KeyboardEventFlags : uint
     {
+        None = 0,
+        ExtendedKey = 0x0001,
         KeyUp = 0x0002,
     }
+
+    public readonly record struct KeyboardInputSpec(ushort VirtualKey, ushort Scan, KeyboardEventFlags Flags);
 }

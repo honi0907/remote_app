@@ -4,6 +4,8 @@ namespace RemoteDesktop.App;
 
 public partial class App : Application
 {
+    public static MainWindow? MainWindowInstance { get; private set; }
+
     public App()
     {
         InitializeComponent();
@@ -11,7 +13,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        var window = new MainWindow();
-        window.Activate();
+        MainWindowInstance = new MainWindow();
+        MainWindowInstance.Activate();
     }
 }

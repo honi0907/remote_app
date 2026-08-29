@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -13,6 +15,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
+using Windows.System;
 using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace RemoteDesktop.App.Views;
@@ -30,6 +33,7 @@ public sealed partial class ViewerPage : Page
     private int _frameCount;
     private DateTime _fpsWindowStart = DateTime.UtcNow;
     private bool _isConnected;
+    private bool _isFullscreen;
     private bool _isPointerCaptured;
     private readonly ConcurrentQueue<EncodedStreamFrame> _h264Queue = new();
     private readonly SemaphoreSlim _decodeSignal = new(0);
@@ -67,6 +71,9 @@ public sealed partial class ViewerPage : Page
         _sessionClient.StreamStatusReceived += OnStreamStatusReceived;
         _sessionClient.LatencyMeasured += OnLatencyMeasured;
         _sessionClient.Disconnected += OnDisconnected;
+
+        RemoteCanvas.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(RemoteCanvas_KeyDown), true);
+        RemoteCanvas.AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(RemoteCanvas_KeyUp), true);
     }
 
     protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -179,6 +186,7 @@ public sealed partial class ViewerPage : Page
             _pingTimer.Start();
             _fpsTimer.Start();
             SessionLog.Write("viewer", $"接続済み {address}:{port}");
+            EnterFullscreen();
             RemoteCanvas.Focus(FocusState.Programmatic);
         }
         catch (Exception ex)
@@ -490,6 +498,7 @@ public sealed partial class ViewerPage : Page
             _isConnected = false;
             _pingTimer.Stop();
             _fpsTimer.Stop();
+            ExitFullscreen();
             ConnectionPanel.Visibility = Visibility.Visible;
             RemotePanel.Visibility = Visibility.Collapsed;
             RemoteImage.Source = null;
@@ -539,6 +548,14 @@ public sealed partial class ViewerPage : Page
         }
     }
 
+    private void RemoteCanvas_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isConnected)
+        {
+            RemoteCanvas.Focus(FocusState.Pointer);
+        }
+    }
+
     private void RemoteCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
         if (!_isConnected || !TryGetNormalized(e.GetCurrentPoint(RemoteCanvas).Position, out var nx, out var ny))
@@ -558,16 +575,18 @@ public sealed partial class ViewerPage : Page
 
         RemoteCanvas.CapturePointer(e.Pointer);
         _isPointerCaptured = true;
-        Focus(FocusState.Programmatic);
+        RemoteCanvas.Focus(FocusState.Pointer);
 
         if (!TryGetNormalized(e.GetCurrentPoint(RemoteCanvas).Position, out var nx, out var ny))
         {
             return;
         }
 
-        var button = e.GetCurrentPoint(RemoteCanvas).Properties.IsRightButtonPressed
-            ? MouseButtonKind.Right
-            : MouseButtonKind.Left;
+        if (!TryGetMouseButton(e, RemoteCanvas, out var button))
+        {
+            return;
+        }
+
         await _sessionClient.SendMouseButtonAsync(button, true, nx, ny);
     }
 
@@ -589,9 +608,11 @@ public sealed partial class ViewerPage : Page
             return;
         }
 
-        var button = e.GetCurrentPoint(RemoteCanvas).Properties.IsRightButtonPressed
-            ? MouseButtonKind.Right
-            : MouseButtonKind.Left;
+        if (!TryGetReleasedMouseButton(e, RemoteCanvas, out var button))
+        {
+            return;
+        }
+
         await _sessionClient.SendMouseButtonAsync(button, false, nx, ny);
     }
 
@@ -610,6 +631,13 @@ public sealed partial class ViewerPage : Page
     {
         if (!_isConnected)
         {
+            return;
+        }
+
+        if (e.Key == VirtualKey.Escape && _isFullscreen)
+        {
+            ExitFullscreen();
+            e.Handled = true;
             return;
         }
 
@@ -639,6 +667,136 @@ public sealed partial class ViewerPage : Page
             _sourceHeight,
             out normalizedX,
             out normalizedY);
+    }
+
+    private static bool TryGetMouseButton(PointerRoutedEventArgs e, Grid canvas, out MouseButtonKind button)
+    {
+        var props = e.GetCurrentPoint(canvas).Properties;
+        return TryMapPointerUpdateKind(props.PointerUpdateKind, out button)
+            || TryMapPressedButtons(props, out button);
+    }
+
+    private static bool TryGetReleasedMouseButton(PointerRoutedEventArgs e, Grid canvas, out MouseButtonKind button)
+    {
+        var props = e.GetCurrentPoint(canvas).Properties;
+        if (TryMapPointerUpdateKind(props.PointerUpdateKind, out button))
+        {
+            return true;
+        }
+
+        if (props.IsLeftButtonPressed)
+        {
+            button = MouseButtonKind.Left;
+            return true;
+        }
+
+        if (props.IsRightButtonPressed)
+        {
+            button = MouseButtonKind.Right;
+            return true;
+        }
+
+        if (props.IsMiddleButtonPressed)
+        {
+            button = MouseButtonKind.Middle;
+            return true;
+        }
+
+        button = MouseButtonKind.Left;
+        return true;
+    }
+
+    private static bool TryMapPointerUpdateKind(PointerUpdateKind kind, out MouseButtonKind button)
+    {
+        switch (kind)
+        {
+            case PointerUpdateKind.LeftButtonPressed:
+            case PointerUpdateKind.LeftButtonReleased:
+                button = MouseButtonKind.Left;
+                return true;
+            case PointerUpdateKind.RightButtonPressed:
+            case PointerUpdateKind.RightButtonReleased:
+                button = MouseButtonKind.Right;
+                return true;
+            case PointerUpdateKind.MiddleButtonPressed:
+            case PointerUpdateKind.MiddleButtonReleased:
+                button = MouseButtonKind.Middle;
+                return true;
+            default:
+                button = MouseButtonKind.Left;
+                return false;
+        }
+    }
+
+    private static bool TryMapPressedButtons(PointerPointProperties props, out MouseButtonKind button)
+    {
+        if (props.IsRightButtonPressed)
+        {
+            button = MouseButtonKind.Right;
+            return true;
+        }
+
+        if (props.IsMiddleButtonPressed)
+        {
+            button = MouseButtonKind.Middle;
+            return true;
+        }
+
+        if (props.IsLeftButtonPressed)
+        {
+            button = MouseButtonKind.Left;
+            return true;
+        }
+
+        button = MouseButtonKind.Left;
+        return false;
+    }
+
+    private void EnterFullscreen()
+    {
+        var appWindow = AppWindowHelper.GetAppWindow(App.MainWindowInstance);
+        if (appWindow is null)
+        {
+            return;
+        }
+
+        appWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+        HeaderBar.Visibility = Visibility.Collapsed;
+        DiagnosticBar.Visibility = Visibility.Collapsed;
+        HeaderRow.Height = new GridLength(0);
+        DiagnosticRow.Height = new GridLength(0);
+        _isFullscreen = true;
+    }
+
+    private void ExitFullscreen()
+    {
+        if (!_isFullscreen)
+        {
+            return;
+        }
+
+        var appWindow = AppWindowHelper.GetAppWindow(App.MainWindowInstance);
+        if (appWindow is not null)
+        {
+            appWindow.SetPresenter(AppWindowPresenterKind.Default);
+        }
+
+        HeaderBar.Visibility = Visibility.Visible;
+        DiagnosticBar.Visibility = Visibility.Visible;
+        HeaderRow.Height = GridLength.Auto;
+        DiagnosticRow.Height = GridLength.Auto;
+        _isFullscreen = false;
+    }
+
+    private void EnterFullscreenButton_Click(object sender, RoutedEventArgs e)
+    {
+        EnterFullscreen();
+        RemoteCanvas.Focus(FocusState.Programmatic);
+    }
+
+    private void ExitFullscreenButton_Click(object sender, RoutedEventArgs e)
+    {
+        ExitFullscreen();
     }
 
     private async void DisconnectButton_Click(object sender, RoutedEventArgs e)
