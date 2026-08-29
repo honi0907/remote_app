@@ -36,6 +36,8 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
                 sourceWidth,
                 sourceHeight,
                 settings.MaxCaptureWidth);
+            width = AlignEven(width);
+            height = AlignEven(height);
 
             EnsureEncoder(width, height, settings.TargetFps);
 
@@ -44,13 +46,12 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
             var bgra = SurfaceBitmapHelper.ExtractBgra(scaledBitmap);
             var nv12 = Nv12Converter.BgraToNv12(bgra, width, height);
             var (payload, isKeyframe) = _encoder.EncodeNv12(nv12);
-            _lastEncodedUtc = DateTime.UtcNow;
-
             if (payload.Length == 0)
             {
                 return Empty();
             }
 
+            _lastEncodedUtc = DateTime.UtcNow;
             var metadata = new FrameMetadata(width, height, DateTime.UtcNow.Ticks);
             return new EncodedStreamFrame(StreamCodec.H264, metadata, payload, isKeyframe);
         }
@@ -107,6 +108,8 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
             .GetAwaiter()
             .GetResult();
     }
+
+    private static int AlignEven(int value) => Math.Max(2, value - (value & 1));
 
     private static EncodedStreamFrame Empty() =>
         new(StreamCodec.H264, new FrameMetadata(0, 0, 0), [], false);

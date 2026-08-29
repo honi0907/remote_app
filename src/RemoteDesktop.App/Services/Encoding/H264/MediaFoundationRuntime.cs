@@ -63,22 +63,39 @@ internal static class MediaFoundationTransformFactory
 
 internal static class MediaFoundationMediaTypeBuilder
 {
-    public static IMFMediaType CreateVideoType(Guid subtype, int width, int height, int fps, int bitrate = 0)
+    public static IMFMediaType CreatePartialVideoType(Guid subtype) =>
+        CreateVideoType(subtype, 0, 0, 0);
+
+    public static IMFMediaType CreateVideoType(Guid subtype, int width, int height, int fps, int bitrate = 0, int stride = 0)
     {
         var mediaType = MediaFactory.MFCreateMediaType();
         mediaType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
         mediaType.Set(MediaTypeAttributeKeys.Subtype, subtype);
         mediaType.Set(MediaTypeAttributeKeys.InterlaceMode, (uint)VideoInterlaceMode.Progressive);
-        mediaType.Set(
-            MediaTypeAttributeKeys.FrameSize,
-            PackSize(width, height));
-        mediaType.Set(
-            MediaTypeAttributeKeys.FrameRate,
-            PackRatio(fps, 1));
+
+        if (width > 0 && height > 0)
+        {
+            mediaType.Set(
+                MediaTypeAttributeKeys.FrameSize,
+                PackSize(width, height));
+        }
+
+        if (fps > 0)
+        {
+            mediaType.Set(
+                MediaTypeAttributeKeys.FrameRate,
+                PackRatio(fps, 1));
+        }
+
+        if (stride != 0)
+        {
+            mediaType.Set(MediaTypeAttributeKeys.DefaultStride, stride);
+        }
 
         if (bitrate > 0)
         {
             mediaType.Set(MediaTypeAttributeKeys.AvgBitrate, (uint)bitrate);
+            mediaType.Set(MediaTypeAttributeKeys.MaxKeyframeSpacing, (ulong)(10_000_000 / Math.Max(1, fps)));
         }
 
         return mediaType;
@@ -134,6 +151,7 @@ internal static class MediaFoundationSampleFactory
 internal static class MediaFoundationTransformHelper
 {
     private const int TransformNeedMoreInput = unchecked((int)0xC00D6D72);
+    private const int TransformStreamChange = unchecked((int)0xC00D6D61);
 
     public static void SendStreamMessages(IMFTransform transform)
     {
@@ -143,11 +161,22 @@ internal static class MediaFoundationTransformHelper
 
     public static byte[]? TryProcessOutput(IMFTransform transform)
     {
+        var streamInfo = transform.GetOutputStreamInfo(0);
         var outputBuffer = new OutputDataBuffer
         {
             StreamID = 0,
             Status = 0,
         };
+
+        IMFSample? callerSample = null;
+        if (((OutputStreamInfoFlags)streamInfo.Flags & OutputStreamInfoFlags.OutputStreamProvidesSamples) == 0)
+        {
+            callerSample = MediaFactory.MFCreateSample();
+            var bufferSize = Math.Max(streamInfo.Size, 1);
+            var mediaBuffer = MediaFactory.MFCreateMemoryBuffer(bufferSize);
+            callerSample.AddBuffer(mediaBuffer);
+            outputBuffer.Sample = callerSample;
+        }
 
         try
         {
@@ -157,9 +186,16 @@ internal static class MediaFoundationTransformHelper
                 ref outputBuffer,
                 out _);
         }
-        catch (SharpGenException ex) when (IsNeedMoreInput(ex.HResult))
+        catch (SharpGenException ex) when (IsNeedMoreInput(ex.HResult) || IsStreamChange(ex.HResult))
         {
             return null;
+        }
+        finally
+        {
+            if (outputBuffer.Sample != callerSample)
+            {
+                callerSample?.Dispose();
+            }
         }
 
         if (outputBuffer.Sample is null)
@@ -174,4 +210,6 @@ internal static class MediaFoundationTransformHelper
     }
 
     public static bool IsNeedMoreInput(int hresult) => hresult == TransformNeedMoreInput;
+
+    private static bool IsStreamChange(int hresult) => hresult == TransformStreamChange;
 }

@@ -2,14 +2,17 @@ namespace RemoteDesktop.App.Services.StreamEncoding.H264;
 
 internal static class Nv12Converter
 {
+    public static int GetStride(int width) => (width + 15) & ~15;
+
+    public static int GetBufferSize(int width, int height) => GetStride(width) * height * 3 / 2;
+
     public static byte[] BgraToNv12(byte[] bgra, int width, int height)
     {
-        var ySize = width * height;
-        var uvSize = ySize / 2;
-        var nv12 = new byte[ySize + uvSize];
+        var stride = GetStride(width);
+        var nv12 = new byte[GetBufferSize(width, height)];
 
         var yIndex = 0;
-        var uvIndex = ySize;
+        var uvIndex = stride * height;
 
         for (var row = 0; row < height; row++)
         {
@@ -21,16 +24,19 @@ internal static class Nv12Converter
                 var r = bgra[bgraIndex + 2];
 
                 var y = (byte)Math.Clamp(((66 * r + 129 * g + 25 * b + 128) >> 8) + 16, 0, 255);
-                nv12[yIndex++] = y;
+                nv12[yIndex + col] = y;
 
                 if ((row & 1) == 0 && (col & 1) == 0)
                 {
                     var u = (byte)Math.Clamp(((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128, 0, 255);
                     var v = (byte)Math.Clamp(((112 * r - 94 * g - 18 * b + 128) >> 8) + 128, 0, 255);
-                    nv12[uvIndex++] = u;
-                    nv12[uvIndex++] = v;
+                    var uvOffset = ((row / 2) * stride) + col;
+                    nv12[uvIndex + uvOffset] = u;
+                    nv12[uvIndex + uvOffset + 1] = v;
                 }
             }
+
+            yIndex += stride;
         }
 
         return nv12;
@@ -38,15 +44,16 @@ internal static class Nv12Converter
 
     public static byte[] Nv12ToBgra(byte[] nv12, int width, int height)
     {
+        var stride = GetStride(width);
         var bgra = new byte[width * height * 4];
-        var yPlaneSize = width * height;
+        var yPlaneSize = stride * height;
 
         for (var row = 0; row < height; row++)
         {
             for (var col = 0; col < width; col++)
             {
-                var y = nv12[row * width + col];
-                var uvIndex = yPlaneSize + ((row / 2) * width) + ((col / 2) * 2);
+                var y = nv12[(row * stride) + col];
+                var uvIndex = yPlaneSize + ((row / 2) * stride) + ((col / 2) * 2);
                 var u = nv12[uvIndex];
                 var v = nv12[uvIndex + 1];
 
