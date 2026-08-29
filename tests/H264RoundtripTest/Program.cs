@@ -87,6 +87,62 @@ Console.WriteLine(
     $"Latest-only decode: key={latest.IsKeyframe} empty={latestDecoded.IsEmpty} err={latestOnlyDecoder.LastError}");
 
 Console.WriteLine("PASS: H.264 sequential encode/decode at 1280x720.");
+
+const int fullWidth = 1920;
+const int fullHeight = 1080;
+const int fullCount = 32;
+var fullEncoder = new H264Encoder();
+fullEncoder.Initialize(fullWidth, fullHeight, 15, 8000);
+var fullFrames = new List<(byte[] Data, bool IsKeyframe)>();
+for (var i = 0; i < fullCount; i++)
+{
+    var bgra = CreateTestPattern(fullWidth, fullHeight, i);
+    var nv12 = Nv12Converter.BgraToNv12(bgra, fullWidth, fullHeight);
+    var encoded = fullEncoder.EncodeNv12(nv12);
+    if (encoded.Data.Length > 0)
+    {
+        fullFrames.Add(encoded);
+        Console.WriteLine($"FullEncode[{i}]: {encoded.Data.Length} bytes key={encoded.IsKeyframe}");
+    }
+}
+
+using var fullDecoder = new H264StreamFrameDecoder();
+var fullHits = 0;
+var fullPredictedHits = 0;
+var fullPredictedCount = 0;
+DecodedVideoFrame fullLast = new([], 0, 0);
+foreach (var (data, isKeyframe) in fullFrames)
+{
+    var decoded = fullDecoder.Decode(new EncodedStreamFrame(
+        StreamCodec.H264,
+        new FrameMetadata(fullWidth, fullHeight, DateTime.UtcNow.Ticks),
+        data,
+        isKeyframe));
+    Console.WriteLine($"FullDecode key={isKeyframe} empty={decoded.IsEmpty} size={decoded.Width}x{decoded.Height} err={fullDecoder.LastError}");
+    if (!isKeyframe)
+    {
+        fullPredictedCount++;
+    }
+
+    if (!decoded.IsEmpty)
+    {
+        fullHits++;
+        fullLast = decoded;
+        if (!isKeyframe)
+        {
+            fullPredictedHits++;
+        }
+    }
+}
+
+Console.WriteLine($"Full sequential: hits={fullHits}/{fullFrames.Count} p={fullPredictedHits}/{fullPredictedCount} last={fullLast.Width}x{fullLast.Height}");
+if (fullHits == 0 || fullLast.Bgra.Length != fullWidth * fullHeight * 4 || fullPredictedHits * 2 < Math.Max(1, fullPredictedCount))
+{
+    Console.Error.WriteLine("FAIL: 1920x1080 H.264 decode.");
+    return 1;
+}
+
+Console.WriteLine("PASS: H.264 sequential encode/decode at 1920x1080.");
 return 0;
 
 static byte[] CreateTestPattern(int width, int height, int offset)

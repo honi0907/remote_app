@@ -165,7 +165,12 @@ internal static class MediaFoundationTransformHelper
         transform.ProcessMessage(TMessageType.MessageNotifyStartOfStream, UIntPtr.Zero);
     }
 
-    public static byte[]? ProcessOutput(IMFTransform transform, ref bool outputConfigured, out int outputWidth, out int outputHeight)
+    public static byte[]? ProcessOutput(
+        IMFTransform transform,
+        ref bool outputConfigured,
+        out int outputWidth,
+        out int outputHeight,
+        int minBufferSize = 0)
     {
         outputWidth = 0;
         outputHeight = 0;
@@ -174,7 +179,7 @@ internal static class MediaFoundationTransformHelper
         {
             try
             {
-                var bytes = TryProcessOutputOnce(transform);
+                var bytes = TryProcessOutputOnce(transform, minBufferSize);
                 if (bytes is null || bytes.Length == 0)
                 {
                     return null;
@@ -202,7 +207,7 @@ internal static class MediaFoundationTransformHelper
         }
     }
 
-    private static byte[]? TryProcessOutputOnce(IMFTransform transform)
+    private static byte[]? TryProcessOutputOnce(IMFTransform transform, int minBufferSize)
     {
         var streamInfo = transform.GetOutputStreamInfo(0);
         var outputBuffer = new OutputDataBuffer
@@ -215,7 +220,7 @@ internal static class MediaFoundationTransformHelper
         if (((OutputStreamInfoFlags)streamInfo.Flags & OutputStreamInfoFlags.OutputStreamProvidesSamples) == 0)
         {
             callerSample = MediaFactory.MFCreateSample();
-            var bufferSize = Math.Max(streamInfo.Size, 1);
+            var bufferSize = Math.Max(Math.Max(streamInfo.Size, minBufferSize), 1);
             var mediaBuffer = MediaFactory.MFCreateMemoryBuffer(bufferSize);
             callerSample.AddBuffer(mediaBuffer);
             outputBuffer.Sample = callerSample;

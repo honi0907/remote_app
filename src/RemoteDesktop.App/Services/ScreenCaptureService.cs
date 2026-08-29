@@ -24,6 +24,8 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     private SizeInt32 _captureSize;
     private bool _isCapturing;
     private bool _encodingSuspended;
+    private IStreamFrameEncoder? _retiredEncoder;
+    private int _encodesInFlight;
 
     public int CaptureWidth => _captureSize.Width;
     public int CaptureHeight => _captureSize.Height;
@@ -39,7 +41,7 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     {
         lock (_encoderSync)
         {
-            _frameEncoder?.Dispose();
+            RetireEncoder_NoLock(_frameEncoder);
             _frameEncoder = StreamFrameEncoderFactory.Create(deliveryMode, out _activeCodec);
             EncodeAttempts = 0;
             EncodeEmpties = 0;
@@ -73,7 +75,7 @@ public sealed class ScreenCaptureService : IAsyncDisposable
                 return;
             }
 
-            _frameEncoder?.Dispose();
+            RetireEncoder_NoLock(_frameEncoder);
             _frameEncoder = new JpegStreamFrameEncoder();
             _activeCodec = StreamCodec.Jpeg;
             LastEncodeError = reason;
@@ -83,10 +85,13 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     public StreamConfigMessage CreateStreamConfig()
     {
         var effective = HostSettingsStore.GetEffectiveSettings();
+        var width = effective.MaxCaptureWidth <= 0
+            ? _captureSize.Width
+            : Math.Min(effective.MaxCaptureWidth, Math.Max(2, _captureSize.Width));
         return new StreamConfigMessage(
             _activeCodec,
             effective.TargetFps,
-            effective.MaxCaptureWidth,
+            width,
             effective.JpegQuality);
     }
 
@@ -142,13 +147,15 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     {
         await StopAsync();
         _frameEncoder?.Dispose();
+        _retiredEncoder?.Dispose();
         _frameEncoder = null;
+        _retiredEncoder = null;
     }
 
     private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
     {
         using var frame = sender.TryGetNextFrame();
-        EncodedStreamFrame encoded;
+        IStreamFrameEncoder? encoder;
         lock (_encoderSync)
         {
             if (frame is null || _encodingSuspended || _frameEncoder is null)
@@ -156,30 +163,77 @@ public sealed class ScreenCaptureService : IAsyncDisposable
                 return;
             }
 
-            try
-            {
-                EncodeAttempts++;
-                encoded = _frameEncoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
-                if (encoded.Payload.Length > 0)
-                {
-                    EncodeSuccesses++;
-                    LastEncodeError = null;
-                }
-                else
-                {
-                    EncodeEmpties++;
-                    return;
-                }
-            }
-            catch (Exception ex)
+            encoder = _frameEncoder;
+            _encodesInFlight++;
+        }
+
+        EncodedStreamFrame encoded;
+        try
+        {
+            EncodeAttempts++;
+            encoded = encoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
+        }
+        catch (Exception ex)
+        {
+            lock (_encoderSync)
             {
                 EncodeEmpties++;
                 LastEncodeError = ex.Message;
+                FinishEncode_NoLock();
+            }
+
+            return;
+        }
+
+        lock (_encoderSync)
+        {
+            var discarded = !ReferenceEquals(encoder, _frameEncoder);
+            FinishEncode_NoLock();
+            if (discarded)
+            {
+                return;
+            }
+
+            if (encoded.Payload.Length > 0)
+            {
+                EncodeSuccesses++;
+                LastEncodeError = null;
+            }
+            else
+            {
+                EncodeEmpties++;
                 return;
             }
         }
 
         FrameCaptured?.Invoke(this, encoded);
+    }
+
+    private void RetireEncoder_NoLock(IStreamFrameEncoder? encoder)
+    {
+        if (encoder is null)
+        {
+            return;
+        }
+
+        if (_encodesInFlight == 0)
+        {
+            encoder.Dispose();
+            return;
+        }
+
+        _retiredEncoder?.Dispose();
+        _retiredEncoder = encoder;
+    }
+
+    private void FinishEncode_NoLock()
+    {
+        _encodesInFlight = Math.Max(0, _encodesInFlight - 1);
+        if (_encodesInFlight == 0 && _retiredEncoder is not null)
+        {
+            _retiredEncoder.Dispose();
+            _retiredEncoder = null;
+        }
     }
 }
 

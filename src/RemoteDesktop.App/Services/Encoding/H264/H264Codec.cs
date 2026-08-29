@@ -141,6 +141,8 @@ internal sealed class H264Decoder : IDisposable
     private IMFTransform? _transform;
     private bool _outputConfigured;
     private long _sampleIndex;
+    private int _configuredWidth;
+    private int _configuredHeight;
 
     public string? LastError { get; private set; }
 
@@ -148,7 +150,7 @@ internal sealed class H264Decoder : IDisposable
     {
         try
         {
-            EnsureTransform();
+            EnsureTransform(frameWidth, frameHeight);
 
             var sampleTime = _sampleIndex * SampleDuration100ns;
             _sampleIndex++;
@@ -173,11 +175,15 @@ internal sealed class H264Decoder : IDisposable
         {
             try
             {
+                var minBuffer = Nv12Converter.GetBufferSize(
+                    Math.Max(frameWidth, _configuredWidth),
+                    Math.Max(frameHeight, _configuredHeight));
                 var output = MediaFoundationTransformHelper.ProcessOutput(
                     _transform!,
                     ref _outputConfigured,
                     out var outputWidth,
-                    out var outputHeight);
+                    out var outputHeight,
+                    minBuffer);
                 if (output is null || output.Length == 0)
                 {
                     LastError = "デコーダが追加入力待ち（キーフレーム未到達の可能性）";
@@ -218,30 +224,54 @@ internal sealed class H264Decoder : IDisposable
         _transform = null;
         _outputConfigured = false;
         _sampleIndex = 0;
+        _configuredWidth = 0;
+        _configuredHeight = 0;
         LastError = null;
     }
 
     public void Dispose() => Reset();
 
-    private void EnsureTransform()
+    private void EnsureTransform(int width, int height)
     {
-        if (_transform is not null)
+        if (_transform is not null &&
+            (width <= 0 || height <= 0 || (_configuredWidth == width && _configuredHeight == height)))
         {
             return;
         }
 
+        Reset();
         MediaFoundationRuntime.EnsureStarted();
         _transform = MediaFoundationTransformFactory.CreateTransform(H264MediaFoundationGuids.H264Decoder);
         CodecApi.ConfigureRealtime(_transform, 8);
-        _sampleIndex = 0;
 
-        using var inputType = MediaFoundationMediaTypeBuilder.CreatePartialVideoType(H264MediaFoundationGuids.H264);
-        _transform.SetInputType(0, inputType, 0);
+        if (width > 0 && height > 0)
+        {
+            using var inputType = MediaFoundationMediaTypeBuilder.CreateVideoType(
+                H264MediaFoundationGuids.H264,
+                width,
+                height,
+                24);
+            _transform.SetInputType(0, inputType, 0);
 
-        using var outputType = _transform.GetOutputAvailableType(0, 0);
-        _transform.SetOutputType(0, outputType, 0);
+            using var outputType = MediaFoundationMediaTypeBuilder.CreateVideoType(
+                H264MediaFoundationGuids.Nv12,
+                width,
+                height,
+                24,
+                stride: Nv12Converter.GetStride(width));
+            _transform.SetOutputType(0, outputType, 0);
+            _configuredWidth = width;
+            _configuredHeight = height;
+        }
+        else
+        {
+            using var inputType = MediaFoundationMediaTypeBuilder.CreatePartialVideoType(H264MediaFoundationGuids.H264);
+            _transform.SetInputType(0, inputType, 0);
+            using var outputType = _transform.GetOutputAvailableType(0, 0);
+            _transform.SetOutputType(0, outputType, 0);
+        }
+
         CodecApi.ConfigureRealtime(_transform, 8);
-
         MediaFoundationTransformHelper.SendStreamMessages(_transform);
         _outputConfigured = true;
     }
@@ -249,8 +279,7 @@ internal sealed class H264Decoder : IDisposable
 
 internal static class H264BitstreamHelper
 {
-    public static bool IsDecodableKeyframe(ReadOnlySpan<byte> data) =>
-        ContainsNalType(data, 5) || (ContainsNalType(data, 7) && ContainsNalType(data, 8));
+    public static bool IsDecodableKeyframe(ReadOnlySpan<byte> data) => ContainsNalType(data, 5);
 
     public static bool ContainsIdr(ReadOnlySpan<byte> data) => ContainsNalType(data, 5);
 

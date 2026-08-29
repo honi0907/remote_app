@@ -58,6 +58,13 @@ internal static class Nv12Converter
             return true;
         }
 
+        var alignedHeight = (height + 15) & ~15;
+        if (alignedHeight != height && bufferLength == alignedStride * alignedHeight * 3 / 2)
+        {
+            stride = alignedStride;
+            return true;
+        }
+
         return false;
     }
 
