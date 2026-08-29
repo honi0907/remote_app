@@ -16,6 +16,7 @@ public sealed partial class HostPage : Page
     private readonly ScreenCaptureService _screenCapture = new();
     private readonly DispatcherQueueTimer _firewallTimer;
     private readonly DispatcherQueueTimer _diagnosticsTimer;
+    private readonly DispatcherQueueTimer _applySettingsTimer;
     private CancellationTokenSource? _cts;
     private string _pin = string.Empty;
     private int _frameCount;
@@ -32,6 +33,10 @@ public sealed partial class HostPage : Page
         _diagnosticsTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         _diagnosticsTimer.Interval = TimeSpan.FromSeconds(1);
         _diagnosticsTimer.Tick += DiagnosticsTimer_Tick;
+
+        _applySettingsTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _applySettingsTimer.Interval = TimeSpan.FromMilliseconds(400);
+        _applySettingsTimer.Tick += ApplySettingsTimer_Tick;
 
         _sessionServer.ClientConnectionRequested += OnClientConnectionRequested;
         _sessionServer.ClientConnected += OnClientConnected;
@@ -65,6 +70,7 @@ public sealed partial class HostPage : Page
     {
         _firewallTimer.Stop();
         _diagnosticsTimer.Stop();
+        _applySettingsTimer.Stop();
         _cts?.Cancel();
         _screenCapture.FrameCaptured -= OnFrameCaptured;
         await _screenCapture.DisposeAsync();
@@ -172,6 +178,54 @@ public sealed partial class HostPage : Page
 
         HostSettingsStore.Save(settings);
         UpdateEffectiveSettingsText();
+        QueueLiveSettingsApply();
+    }
+
+    private void QueueLiveSettingsApply()
+    {
+        if (!_sessionServer.HasAuthenticatedClient)
+        {
+            return;
+        }
+
+        _applySettingsTimer.Stop();
+        _applySettingsTimer.Start();
+    }
+
+    private void ApplySettingsTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        _applySettingsTimer.Stop();
+        _ = ApplyLiveSettingsAsync();
+    }
+
+    private async Task ApplyLiveSettingsAsync()
+    {
+        if (!_sessionServer.HasAuthenticatedClient)
+        {
+            return;
+        }
+
+        var settings = HostSettingsStore.Load();
+        try
+        {
+            _screenCapture.SuspendEncoding();
+            _sessionServer.ClearPendingFrames();
+            _screenCapture.ConfigureEncoder(settings.DeliveryMode);
+            await _sessionServer.SendStreamConfigAsync(_screenCapture.CreateStreamConfig());
+            _screenCapture.ResumeEncoding();
+
+            var codecLabel = _screenCapture.ActiveCodec == StreamCodec.H264 ? "H.264" : "JPEG";
+            StatusText.Text = $"クライアント接続済み - 設定を反映しました ({codecLabel})";
+            DiagnosticText.Text =
+                $"診断: 設定反映 codec={_screenCapture.ActiveCodec} capture={_screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight}";
+            SessionLog.Write("host", DiagnosticText.Text);
+        }
+        catch (Exception ex)
+        {
+            _screenCapture.ResumeEncoding();
+            SessionLog.Write("host", $"設定反映失敗 {ex.Message}");
+            StatusText.Text = "設定の反映に失敗しました。再接続してください。";
+        }
     }
 
     private void ManualSetting_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -279,6 +333,7 @@ public sealed partial class HostPage : Page
             DiagnosticText.Text = "診断: 待機中";
             ViewerDiagnosticText.Text = "接続側: 未受信";
             SessionLog.Write("host", "クライアント切断");
+            _applySettingsTimer.Stop();
             _diagnosticsTimer.Stop();
             await _screenCapture.StopAsync();
         });

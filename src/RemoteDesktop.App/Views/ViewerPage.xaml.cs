@@ -265,6 +265,20 @@ public sealed partial class ViewerPage : Page
                 {
                     _sourceWidth = pending.Metadata.Width;
                     _sourceHeight = pending.Metadata.Height;
+                    if (pending.IsKeyframe &&
+                        pending.Metadata.Width > 0 &&
+                        _lockedWidth > 0 &&
+                        (pending.Metadata.Width != _lockedWidth || pending.Metadata.Height != _lockedHeight))
+                    {
+                        lock (_decodeSync)
+                        {
+                            _h264Decoder.Reset();
+                        }
+
+                        _lockedWidth = 0;
+                        _lockedHeight = 0;
+                    }
+
                     try
                     {
                         DecodedVideoFrame decoded;

@@ -12,6 +12,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
     private DateTime _lastEncodedUtc = DateTime.MinValue;
     private int _configuredWidth;
     private int _configuredHeight;
+    private int _configuredFps;
     private bool _hasSentFrame;
 
     public StreamCodec Codec => StreamCodec.H264;
@@ -69,7 +70,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
 
     private void EnsureEncoder(int width, int height, int fps)
     {
-        if (_configuredWidth == width && _configuredHeight == height)
+        if (_configuredWidth == width && _configuredHeight == height && _configuredFps == fps)
         {
             return;
         }
@@ -78,6 +79,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
         _encoder.Initialize(width, height, fps, bitrateKbps);
         _configuredWidth = width;
         _configuredHeight = height;
+        _configuredFps = fps;
         _hasSentFrame = false;
     }
 
@@ -104,7 +106,12 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
     private static int EstimateBitrateKbps(int width, int height, int fps)
     {
         var pixels = (long)width * height;
-        return (int)Math.Clamp(pixels * fps / 120_000, 2_000, 12_000);
+        var settings = HostSettingsStore.GetEffectiveSettings();
+        var preferQuality = settings.Preset == StreamQualityPreset.Quality || settings.MaxCaptureWidth <= 0;
+        var divisor = preferQuality ? 40_000 : 55_000;
+        var min = preferQuality ? 6_000 : 4_000;
+        var max = preferQuality ? 20_000 : 14_000;
+        return (int)Math.Clamp(pixels * fps / divisor, min, max);
     }
 
     private static byte[] ScaleBgra(byte[] source, int sourceWidth, int sourceHeight, int width, int height)

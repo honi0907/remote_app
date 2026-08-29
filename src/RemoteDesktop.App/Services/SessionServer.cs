@@ -9,6 +9,7 @@ public sealed class SessionServer : IAsyncDisposable
     private readonly MessageReader _reader = new();
     private readonly object _clientSync = new();
     private readonly object _frameSendSync = new();
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly Queue<EncodedStreamFrame> _frameQueue = new();
     private Task? _frameSendTask;
     private const int MaxQueuedH264Frames = 12;
@@ -107,20 +108,12 @@ public sealed class SessionServer : IAsyncDisposable
             return;
         }
 
-        NetworkStream? stream;
         lock (_clientSync)
         {
             if (!_authenticated)
             {
                 return;
             }
-
-            stream = _stream;
-        }
-
-        if (stream is null)
-        {
-            return;
         }
 
         var message = frame.Codec switch
@@ -130,7 +123,15 @@ public sealed class SessionServer : IAsyncDisposable
             StreamCodec.H265 => MessageSerializer.BuildVideoFrame(frame.Metadata, frame.Payload, frame.IsKeyframe),
             _ => MessageSerializer.BuildFrame(frame.Metadata, frame.Payload),
         };
-        await stream.WriteAsync(message);
+        await WriteAsync(message);
+    }
+
+    public void ClearPendingFrames()
+    {
+        lock (_frameSendSync)
+        {
+            _frameQueue.Clear();
+        }
     }
 
     public void QueueFrame(EncodedStreamFrame frame)
@@ -318,18 +319,26 @@ public sealed class SessionServer : IAsyncDisposable
 
     private async Task WriteAsync(byte[] message)
     {
-        NetworkStream? stream;
-        lock (_clientSync)
+        await _writeLock.WaitAsync();
+        try
         {
-            stream = _stream;
-        }
+            NetworkStream? stream;
+            lock (_clientSync)
+            {
+                stream = _stream;
+            }
 
-        if (stream is null)
+            if (stream is null)
+            {
+                return;
+            }
+
+            await stream.WriteAsync(message);
+        }
+        finally
         {
-            return;
+            _writeLock.Release();
         }
-
-        await stream.WriteAsync(message);
     }
 
     private async Task DisconnectClientAsync()

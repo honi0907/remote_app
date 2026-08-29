@@ -23,6 +23,7 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     private IDirect3DDevice? _device;
     private SizeInt32 _captureSize;
     private bool _isCapturing;
+    private bool _encodingSuspended;
 
     public int CaptureWidth => _captureSize.Width;
     public int CaptureHeight => _captureSize.Height;
@@ -44,6 +45,22 @@ public sealed class ScreenCaptureService : IAsyncDisposable
             EncodeEmpties = 0;
             EncodeSuccesses = 0;
             LastEncodeError = null;
+        }
+    }
+
+    public void SuspendEncoding()
+    {
+        lock (_encoderSync)
+        {
+            _encodingSuspended = true;
+        }
+    }
+
+    public void ResumeEncoding()
+    {
+        lock (_encoderSync)
+        {
+            _encodingSuspended = false;
         }
     }
 
@@ -131,37 +148,38 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
     {
         using var frame = sender.TryGetNextFrame();
-        IStreamFrameEncoder? encoder;
+        EncodedStreamFrame encoded;
         lock (_encoderSync)
         {
-            encoder = _frameEncoder;
-        }
-
-        if (frame is null || encoder is null)
-        {
-            return;
-        }
-
-        try
-        {
-            EncodeAttempts++;
-            var encoded = encoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
-            if (encoded.Payload.Length > 0)
+            if (frame is null || _encodingSuspended || _frameEncoder is null)
             {
-                EncodeSuccesses++;
-                LastEncodeError = null;
-                FrameCaptured?.Invoke(this, encoded);
+                return;
             }
-            else
+
+            try
+            {
+                EncodeAttempts++;
+                encoded = _frameEncoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
+                if (encoded.Payload.Length > 0)
+                {
+                    EncodeSuccesses++;
+                    LastEncodeError = null;
+                }
+                else
+                {
+                    EncodeEmpties++;
+                    return;
+                }
+            }
+            catch (Exception ex)
             {
                 EncodeEmpties++;
+                LastEncodeError = ex.Message;
+                return;
             }
         }
-        catch (Exception ex)
-        {
-            EncodeEmpties++;
-            LastEncodeError = ex.Message;
-        }
+
+        FrameCaptured?.Invoke(this, encoded);
     }
 }
 
