@@ -25,8 +25,9 @@ internal sealed class H264Encoder : IDisposable
         MediaFoundationRuntime.EnsureStarted();
 
         _transform = MediaFoundationTransformFactory.CreateTransform(H264MediaFoundationGuids.H264Encoder);
-        CodecApi.ConfigureGop(_transform, 8);
+        CodecApi.ConfigureRealtime(_transform, 8);
         ConfigureTransform(_transform, width, height, fps, bitrateKbps * 1000);
+        CodecApi.ConfigureRealtime(_transform, 8);
         MediaFoundationTransformHelper.SendStreamMessages(_transform);
 
         _width = width;
@@ -55,6 +56,7 @@ internal sealed class H264Encoder : IDisposable
         _transform.ProcessInput(0, sample, 0);
         _frameIndex++;
 
+        byte[]? combined = null;
         while (true)
         {
             try
@@ -69,7 +71,7 @@ internal sealed class H264Encoder : IDisposable
                     break;
                 }
 
-                return (output, H264BitstreamHelper.IsDecodableKeyframe(output));
+                combined = ConcatAnnexB(combined, output);
             }
             catch (SharpGenException ex) when (MediaFoundationTransformHelper.IsNeedMoreInput(ex.HResult))
             {
@@ -77,12 +79,30 @@ internal sealed class H264Encoder : IDisposable
             }
         }
 
-        return ([], false);
+        if (combined is null)
+        {
+            return ([], false);
+        }
+
+        return (combined, H264BitstreamHelper.IsDecodableKeyframe(combined));
     }
 
     public void Dispose()
     {
         DisposeTransform();
+    }
+
+    private static byte[] ConcatAnnexB(byte[]? left, byte[] right)
+    {
+        if (left is null || left.Length == 0)
+        {
+            return right;
+        }
+
+        var combined = new byte[left.Length + right.Length];
+        left.CopyTo(combined, 0);
+        right.CopyTo(combined, left.Length);
+        return combined;
     }
 
     private static void ConfigureTransform(IMFTransform transform, int width, int height, int fps, int bitrate)
@@ -117,8 +137,10 @@ internal sealed class H264Encoder : IDisposable
 
 internal sealed class H264Decoder : IDisposable
 {
+    private const long SampleDuration100ns = 333_333;
     private IMFTransform? _transform;
     private bool _outputConfigured;
+    private long _sampleIndex;
 
     public string? LastError { get; private set; }
 
@@ -128,23 +150,15 @@ internal sealed class H264Decoder : IDisposable
         {
             EnsureTransform();
 
-            using var sample = MediaFoundationSampleFactory.CreateSampleFromBuffer(bitstream, 0, 0);
+            var sampleTime = _sampleIndex * SampleDuration100ns;
+            _sampleIndex++;
+            using var sample = MediaFoundationSampleFactory.CreateSampleFromBuffer(
+                bitstream,
+                sampleTime,
+                SampleDuration100ns);
             _transform!.ProcessInput(0, sample, 0);
 
-            var decoded = TryReadOutput(frameWidth, frameHeight);
-            if (decoded.Bgra.Length > 0)
-            {
-                return decoded;
-            }
-
-            if (H264BitstreamHelper.IsDecodableKeyframe(bitstream))
-            {
-                _transform.ProcessMessage(TMessageType.MessageCommandDrain, UIntPtr.Zero);
-                decoded = TryReadOutput(frameWidth, frameHeight);
-                MediaFoundationTransformHelper.SendStreamMessages(_transform);
-            }
-
-            return decoded;
+            return TryReadOutput(frameWidth, frameHeight);
         }
         catch (Exception ex)
         {
@@ -166,6 +180,7 @@ internal sealed class H264Decoder : IDisposable
                     out var outputHeight);
                 if (output is null || output.Length == 0)
                 {
+                    LastError = "デコーダが追加入力待ち（キーフレーム未到達の可能性）";
                     continue;
                 }
 
@@ -202,6 +217,7 @@ internal sealed class H264Decoder : IDisposable
         _transform?.Dispose();
         _transform = null;
         _outputConfigured = false;
+        _sampleIndex = 0;
         LastError = null;
     }
 
@@ -216,12 +232,15 @@ internal sealed class H264Decoder : IDisposable
 
         MediaFoundationRuntime.EnsureStarted();
         _transform = MediaFoundationTransformFactory.CreateTransform(H264MediaFoundationGuids.H264Decoder);
+        CodecApi.ConfigureRealtime(_transform, 8);
+        _sampleIndex = 0;
 
         using var inputType = MediaFoundationMediaTypeBuilder.CreatePartialVideoType(H264MediaFoundationGuids.H264);
         _transform.SetInputType(0, inputType, 0);
 
         using var outputType = _transform.GetOutputAvailableType(0, 0);
         _transform.SetOutputType(0, outputType, 0);
+        CodecApi.ConfigureRealtime(_transform, 8);
 
         MediaFoundationTransformHelper.SendStreamMessages(_transform);
         _outputConfigured = true;

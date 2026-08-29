@@ -10,6 +10,7 @@ MediaFoundationRuntime.EnsureStarted();
 
 var encoder = new H264Encoder();
 encoder.Initialize(width, height, 24, 4000);
+Console.WriteLine($"Encoder codecapi: {CodecApi.LastStatus}");
 
 var encodedFrames = new List<(byte[] Data, bool IsKeyframe)>();
 for (var i = 0; i < frameCount; i++)
@@ -32,6 +33,8 @@ if (encodedFrames.Count == 0 || !encodedFrames.Any(f => f.IsKeyframe))
 
 using var sequentialDecoder = new H264StreamFrameDecoder();
 var sequentialHits = 0;
+var predictedHits = 0;
+var predictedCount = 0;
 DecodedVideoFrame last = new([], 0, 0);
 foreach (var (data, isKeyframe) in encodedFrames)
 {
@@ -42,19 +45,34 @@ foreach (var (data, isKeyframe) in encodedFrames)
         isKeyframe);
     var decoded = sequentialDecoder.Decode(frame);
     Console.WriteLine($"Decode key={isKeyframe} empty={decoded.IsEmpty} size={decoded.Width}x{decoded.Height} err={sequentialDecoder.LastError}");
+    if (!isKeyframe)
+    {
+        predictedCount++;
+    }
+
     if (!decoded.IsEmpty)
     {
         sequentialHits++;
         last = decoded;
+        if (!isKeyframe)
+        {
+            predictedHits++;
+        }
     }
 }
 
 var sequentialNonZero = last.Bgra.Count(b => b != 0);
-Console.WriteLine($"Sequential decode: hits={sequentialHits}/{encodedFrames.Count} last={last.Width}x{last.Height} nonZero={sequentialNonZero} err={sequentialDecoder.LastError}");
+Console.WriteLine($"Sequential decode: hits={sequentialHits}/{encodedFrames.Count} p={predictedHits}/{predictedCount} last={last.Width}x{last.Height} nonZero={sequentialNonZero} err={sequentialDecoder.LastError}");
 
 if (sequentialHits == 0 || last.Bgra.Length != width * height * 4 || sequentialNonZero < 1000)
 {
     Console.Error.WriteLine("FAIL: sequential H.264 decode.");
+    return 1;
+}
+
+if (predictedCount == 0 || predictedHits * 2 < predictedCount)
+{
+    Console.Error.WriteLine($"FAIL: P-frames did not decode ({predictedHits}/{predictedCount}).");
     return 1;
 }
 
