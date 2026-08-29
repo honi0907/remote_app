@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using RemoteDesktop.App.Protocol;
 using Windows.Graphics.DirectX.Direct3D11;
 using Windows.Graphics.Imaging;
@@ -27,32 +27,8 @@ internal static class SurfaceBitmapHelper
             return ExtractBgra(converted);
         }
 
-        var width = bitmap.PixelWidth;
-        var height = bitmap.PixelHeight;
-        var pixels = new byte[width * height * 4];
-
-        using var buffer = bitmap.LockBuffer(BitmapBufferAccessMode.Read);
-        var plane = buffer.GetPlaneDescription(0);
-        var stride = plane.Stride;
-
-        using var reference = buffer.CreateReference();
-        unsafe
-        {
-            var byteAccess = (IMemoryBufferByteAccess)reference;
-            byteAccess.GetBuffer(out var data, out _);
-
-            if (stride == width * 4)
-            {
-                Marshal.Copy((IntPtr)data, pixels, 0, pixels.Length);
-                return pixels;
-            }
-
-            for (var row = 0; row < height; row++)
-            {
-                Marshal.Copy((IntPtr)(data + (row * stride)), pixels, row * width * 4, width * 4);
-            }
-        }
-
+        var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+        bitmap.CopyToBuffer(pixels.AsBuffer());
         return pixels;
     }
 
@@ -67,12 +43,4 @@ internal static class SurfaceBitmapHelper
         var scaledHeight = Math.Max(1, (int)Math.Round(sourceHeight * scale));
         return (maxWidth, scaledHeight);
     }
-}
-
-[ComImport]
-[Guid("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal unsafe interface IMemoryBufferByteAccess
-{
-    void GetBuffer(out byte* buffer, out uint capacity);
 }
