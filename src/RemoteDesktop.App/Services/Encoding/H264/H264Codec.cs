@@ -171,10 +171,10 @@ internal sealed class H264Decoder : IDisposable
 
                 if (!Nv12Converter.TryResolveLayout(
                         output.Length,
-                        outputWidth,
-                        outputHeight,
                         frameWidth,
                         frameHeight,
+                        outputWidth,
+                        outputHeight,
                         out var width,
                         out var height,
                         out var stride))

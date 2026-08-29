@@ -35,6 +35,8 @@ public sealed partial class ViewerPage : Page
     private readonly SemaphoreSlim _decodeSignal = new(0);
     private readonly object _decodeSync = new();
     private WriteableBitmap? _h264Bitmap;
+    private int _lockedWidth;
+    private int _lockedHeight;
     private (byte[] Bgra, int Width, int Height)? _pendingPresent;
     private int _presentQueued;
     private (FrameMetadata Metadata, byte[] Payload, StreamCodec Codec, bool IsKeyframe)? _latestJpegFrame;
@@ -197,6 +199,9 @@ public sealed partial class ViewerPage : Page
         _h264Keyframes = 0;
         _lastPayloadBytes = 0;
         _lastPixelNonZero = 0;
+        _lockedWidth = 0;
+        _lockedHeight = 0;
+        _h264Bitmap = null;
         _lastDetail = $"StreamConfig codec={config.Codec}";
         lock (_decodeSync)
         {
@@ -274,9 +279,10 @@ public sealed partial class ViewerPage : Page
 
                         _h264DecodeFailures = 0;
                         _h264Decoded++;
-                        _sourceWidth = decoded.Width;
-                        _sourceHeight = decoded.Height;
-                        lastDecoded = decoded;
+                        var present = FitToLockedSize(decoded, pending.Metadata.Width, pending.Metadata.Height);
+                        _sourceWidth = present.Width;
+                        _sourceHeight = present.Height;
+                        lastDecoded = present;
                     }
                     catch (Exception ex)
                     {
@@ -388,7 +394,57 @@ public sealed partial class ViewerPage : Page
             $"診断: codec={_activeCodec} 受信={_h264Received} key={_h264Keyframes} " +
             $"デコード={_h264Decoded} 失敗={_h264DecodeFailures} 最終={_lastPayloadBytes}B 非ゼロ={_lastPixelNonZero} / {detail}";
         DiagnosticText.Text = text;
-        OverlayDiagnosticText.Text = text;
+    }
+
+    private DecodedVideoFrame FitToLockedSize(DecodedVideoFrame decoded, int metadataWidth, int metadataHeight)
+    {
+        var width = decoded.Width;
+        var height = decoded.Height;
+        if (metadataWidth > 0 &&
+            metadataHeight > 0 &&
+            decoded.Bgra.Length == metadataWidth * metadataHeight * 4)
+        {
+            width = metadataWidth;
+            height = metadataHeight;
+        }
+
+        if (_lockedWidth <= 0 || _lockedHeight <= 0)
+        {
+            _lockedWidth = width;
+            _lockedHeight = height;
+            return new DecodedVideoFrame(decoded.Bgra, width, height);
+        }
+
+        if (width == _lockedWidth && height == _lockedHeight)
+        {
+            return new DecodedVideoFrame(decoded.Bgra, width, height);
+        }
+
+        return new DecodedVideoFrame(
+            ScaleBgra(decoded.Bgra, width, height, _lockedWidth, _lockedHeight),
+            _lockedWidth,
+            _lockedHeight);
+    }
+
+    private static byte[] ScaleBgra(byte[] source, int sourceWidth, int sourceHeight, int width, int height)
+    {
+        var destination = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        {
+            var sourceY = Math.Min(sourceHeight - 1, y * sourceHeight / height);
+            for (var x = 0; x < width; x++)
+            {
+                var sourceX = Math.Min(sourceWidth - 1, x * sourceWidth / width);
+                var sourceIndex = (sourceY * sourceWidth + sourceX) * 4;
+                var destIndex = (y * width + x) * 4;
+                destination[destIndex] = source[sourceIndex];
+                destination[destIndex + 1] = source[sourceIndex + 1];
+                destination[destIndex + 2] = source[sourceIndex + 2];
+                destination[destIndex + 3] = source[sourceIndex + 3];
+            }
+        }
+
+        return destination;
     }
 
     private static int CountNonZeroRgb(byte[] bgra)

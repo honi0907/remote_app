@@ -89,19 +89,9 @@
                     <Image
                         x:Name="RemoteImage"
                         Stretch="Uniform"
-                        HorizontalAlignment="Stretch"
-                        VerticalAlignment="Stretch"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
                         IsHitTestVisible="False" />
-                    <TextBlock
-                        x:Name="OverlayDiagnosticText"
-                        Margin="12"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Top"
-                        FontWeight="SemiBold"
-                        Foreground="#FFE6B800"
-                        TextWrapping="Wrap"
-                        IsHitTestVisible="False"
-                        Text="診断: 接続直後" />
                 </Grid>
             </Grid>
         </Grid>
