@@ -13,6 +13,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
     private int _configuredWidth;
     private int _configuredHeight;
     private int _configuredFps;
+    private bool _configuredPreferQuality;
     private bool _hasSentFrame;
 
     public StreamCodec Codec => StreamCodec.H264;
@@ -40,7 +41,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
             width = AlignEven(width);
             height = AlignEven(height);
 
-            EnsureEncoder(width, height, settings.TargetFps);
+            EnsureEncoder(width, height, settings.TargetFps, PreferQuality(settings));
 
             using var bitmap = SurfaceBitmapHelper.CopySurfaceToBitmap(surface);
             var bgra = ScaleBgra(SurfaceBitmapHelper.ExtractBgra(bitmap), bitmap.PixelWidth, bitmap.PixelHeight, width, height);
@@ -68,18 +69,22 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
         _gate.Dispose();
     }
 
-    private void EnsureEncoder(int width, int height, int fps)
+    private void EnsureEncoder(int width, int height, int fps, bool preferQuality)
     {
-        if (_configuredWidth == width && _configuredHeight == height && _configuredFps == fps)
+        if (_configuredWidth == width &&
+            _configuredHeight == height &&
+            _configuredFps == fps &&
+            _configuredPreferQuality == preferQuality)
         {
             return;
         }
 
-        var bitrateKbps = EstimateBitrateKbps(width, height, fps);
-        _encoder.Initialize(width, height, fps, bitrateKbps);
+        var bitrateKbps = EstimateBitrateKbps(width, height, fps, preferQuality);
+        _encoder.Initialize(width, height, fps, bitrateKbps, preferQuality);
         _configuredWidth = width;
         _configuredHeight = height;
         _configuredFps = fps;
+        _configuredPreferQuality = preferQuality;
         _hasSentFrame = false;
     }
 
@@ -103,14 +108,15 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
         return ([], false);
     }
 
-    private static int EstimateBitrateKbps(int width, int height, int fps)
+    private static bool PreferQuality(StreamSettings settings) =>
+        settings.Preset == StreamQualityPreset.Quality || settings.MaxCaptureWidth <= 0;
+
+    private static int EstimateBitrateKbps(int width, int height, int fps, bool preferQuality)
     {
         var pixels = (long)width * height;
-        var settings = HostSettingsStore.GetEffectiveSettings();
-        var preferQuality = settings.Preset == StreamQualityPreset.Quality || settings.MaxCaptureWidth <= 0;
-        var divisor = preferQuality ? 40_000 : 55_000;
-        var min = preferQuality ? 6_000 : 4_000;
-        var max = preferQuality ? 20_000 : 14_000;
+        var divisor = preferQuality ? 2_400 : 2_200;
+        var min = preferQuality ? 12_000 : 8_000;
+        var max = preferQuality ? 28_000 : 16_000;
         return (int)Math.Clamp(pixels * fps / divisor, min, max);
     }
 
@@ -122,18 +128,31 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
         }
 
         var destination = new byte[width * height * 4];
+        var xRatio = (double)(sourceWidth - 1) / Math.Max(1, width - 1);
+        var yRatio = (double)(sourceHeight - 1) / Math.Max(1, height - 1);
         for (var y = 0; y < height; y++)
         {
-            var sourceY = Math.Min(sourceHeight - 1, y * sourceHeight / height);
+            var sourceY = y * yRatio;
+            var y0 = (int)sourceY;
+            var y1 = Math.Min(y0 + 1, sourceHeight - 1);
+            var fy = sourceY - y0;
             for (var x = 0; x < width; x++)
             {
-                var sourceX = Math.Min(sourceWidth - 1, x * sourceWidth / width);
-                var sourceIndex = (sourceY * sourceWidth + sourceX) * 4;
+                var sourceX = x * xRatio;
+                var x0 = (int)sourceX;
+                var x1 = Math.Min(x0 + 1, sourceWidth - 1);
+                var fx = sourceX - x0;
                 var destIndex = (y * width + x) * 4;
-                destination[destIndex] = source[sourceIndex];
-                destination[destIndex + 1] = source[sourceIndex + 1];
-                destination[destIndex + 2] = source[sourceIndex + 2];
-                destination[destIndex + 3] = source[sourceIndex + 3];
+                for (var channel = 0; channel < 4; channel++)
+                {
+                    var c00 = source[(y0 * sourceWidth + x0) * 4 + channel];
+                    var c10 = source[(y0 * sourceWidth + x1) * 4 + channel];
+                    var c01 = source[(y1 * sourceWidth + x0) * 4 + channel];
+                    var c11 = source[(y1 * sourceWidth + x1) * 4 + channel];
+                    var top = c00 + ((c10 - c00) * fx);
+                    var bottom = c01 + ((c11 - c01) * fx);
+                    destination[destIndex + channel] = (byte)Math.Clamp(top + ((bottom - top) * fy), 0, 255);
+                }
             }
         }
 

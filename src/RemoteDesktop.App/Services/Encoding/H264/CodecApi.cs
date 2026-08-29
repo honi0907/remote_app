@@ -10,6 +10,10 @@ internal static class CodecApi
     private static readonly Guid GopSize = new("95d9d8aa-0d08-4862-ab6c-3e4d83dd71dd");
     private static readonly Guid LowLatency = new("9C27891A-ED7A-40E1-88E8-B22727A024EE");
     private static readonly Guid BPictureCount = new("8D390AAC-DC7C-458C-9B71-C36C7B16BA0F");
+    private static readonly Guid QualityVsSpeed = new("98332DF8-03CD-476B-89FA-3F9E442DEC9F");
+    private static readonly Guid RateControlMode = new("1C2074D0-6CF9-4910-8BA4-0C5BC756260A");
+    private static readonly Guid CommonQuality = new("FCBF57A3-7EA5-4B0C-9644-69B40C39C391");
+    private static readonly Guid CabacEnable = new("EE6CAD62-D305-4248-A50E-6D867DC1738C");
     private const ushort VtUi4 = 19;
     private const ushort VtBool = 11;
 
@@ -28,6 +32,14 @@ internal static class CodecApi
         LastStatus =
             $"attr low={lowLatencyAttr:X8} gop={gopAttr:X8} b={bAttr:X8}; " +
             $"codec low={lowLatencyCodec:X8} lowBool={lowLatencyBool:X8} gop={gopCodec:X8} b={bCodec:X8}";
+    }
+
+    public static void ConfigureQuality(IMFTransform transform, bool preferQuality)
+    {
+        SetAttributeUint(transform, QualityVsSpeed, preferQuality ? 12u : 40u);
+        SetAttributeUint(transform, RateControlMode, preferQuality ? 3u : 2u);
+        SetAttributeUint(transform, CommonQuality, preferQuality ? 90u : 74u);
+        SetAttributeUint(transform, CabacEnable, 1);
     }
 
     public static void ConfigureGop(IMFTransform transform, int gopFrames) =>

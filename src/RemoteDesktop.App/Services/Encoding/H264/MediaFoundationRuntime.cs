@@ -66,7 +66,14 @@ internal static class MediaFoundationMediaTypeBuilder
     public static IMFMediaType CreatePartialVideoType(Guid subtype) =>
         CreateVideoType(subtype, 0, 0, 0);
 
-    public static IMFMediaType CreateVideoType(Guid subtype, int width, int height, int fps, int bitrate = 0, int stride = 0)
+    public static IMFMediaType CreateVideoType(
+        Guid subtype,
+        int width,
+        int height,
+        int fps,
+        int bitrate = 0,
+        int stride = 0,
+        int mpeg2Profile = 0)
     {
         var mediaType = MediaFactory.MFCreateMediaType();
         mediaType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
@@ -96,6 +103,11 @@ internal static class MediaFoundationMediaTypeBuilder
         {
             mediaType.Set(MediaTypeAttributeKeys.AvgBitrate, (uint)bitrate);
             mediaType.Set(MediaTypeAttributeKeys.MaxKeyframeSpacing, 8u);
+        }
+
+        if (mpeg2Profile > 0)
+        {
+            mediaType.Set(new Guid("AD76A80B-2D5C-4E0B-B375-64E520137036"), (uint)mpeg2Profile);
         }
 
         return mediaType;

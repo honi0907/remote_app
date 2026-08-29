@@ -13,10 +13,11 @@ internal sealed class H264Encoder : IDisposable
     private long _frameIndex;
     private bool _initialized;
     private bool _outputConfigured;
+    private bool _preferQuality;
 
-    public void Initialize(int width, int height, int fps, int bitrateKbps)
+    public void Initialize(int width, int height, int fps, int bitrateKbps, bool preferQuality = false)
     {
-        if (_initialized && _width == width && _height == height && _fps == fps)
+        if (_initialized && _width == width && _height == height && _fps == fps && _preferQuality == preferQuality)
         {
             return;
         }
@@ -26,9 +27,12 @@ internal sealed class H264Encoder : IDisposable
 
         _transform = MediaFoundationTransformFactory.CreateTransform(H264MediaFoundationGuids.H264Encoder);
         CodecApi.ConfigureRealtime(_transform, 8);
+        CodecApi.ConfigureQuality(_transform, preferQuality);
         ConfigureTransform(_transform, width, height, fps, bitrateKbps * 1000);
         CodecApi.ConfigureRealtime(_transform, 8);
+        CodecApi.ConfigureQuality(_transform, preferQuality);
         MediaFoundationTransformHelper.SendStreamMessages(_transform);
+        _preferQuality = preferQuality;
 
         _width = width;
         _height = height;
@@ -114,7 +118,8 @@ internal sealed class H264Encoder : IDisposable
             width,
             height,
             fps,
-            bitrate);
+            bitrate,
+            mpeg2Profile: 100);
         transform.SetOutputType(0, outputType, 0);
 
         using var inputType = MediaFoundationMediaTypeBuilder.CreateVideoType(
