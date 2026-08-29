@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>x64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Vortice.MediaFoundation" Version="3.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\RemoteDesktop.App\Protocol\Messages.cs" Link="Protocol\Messages.cs" />
+    <Compile Include="..\..\src\RemoteDesktop.App\Protocol\StreamCodec.cs" Link="Protocol\StreamCodec.cs" />
+    <Compile Include="..\..\src\RemoteDesktop.App\Services\Encoding\H264\*.cs" Link="H264\%(Filename).cs" />
+    <Compile Include="..\..\src\RemoteDesktop.App\Services\Encoding\H264StreamFrameDecoder.cs" Link="H264StreamFrameDecoder.cs" />
+  </ItemGroup>
+</Project>

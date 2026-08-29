@@ -101,6 +101,12 @@ internal static class MediaFoundationMediaTypeBuilder
         return mediaType;
     }
 
+    public static (int Width, int Height) ReadFrameSize(IMFMediaType mediaType)
+    {
+        var packed = mediaType.GetUInt64(MediaTypeAttributeKeys.FrameSize);
+        return ((int)(packed >> 32), (int)(packed & 0xFFFFFFFF));
+    }
+
     private static ulong PackSize(int width, int height) =>
         ((ulong)(uint)width << 32) | (uint)height;
 
@@ -159,7 +165,44 @@ internal static class MediaFoundationTransformHelper
         transform.ProcessMessage(TMessageType.MessageNotifyStartOfStream, UIntPtr.Zero);
     }
 
-    public static byte[]? TryProcessOutput(IMFTransform transform)
+    public static byte[]? ProcessOutput(IMFTransform transform, ref bool outputConfigured, out int outputWidth, out int outputHeight)
+    {
+        outputWidth = 0;
+        outputHeight = 0;
+
+        while (true)
+        {
+            try
+            {
+                var bytes = TryProcessOutputOnce(transform);
+                if (bytes is null || bytes.Length == 0)
+                {
+                    return null;
+                }
+
+                if (outputConfigured)
+                {
+                    using var currentType = transform.GetOutputCurrentType(0);
+                    (outputWidth, outputHeight) = MediaFoundationMediaTypeBuilder.ReadFrameSize(currentType);
+                }
+
+                return bytes;
+            }
+            catch (SharpGenException ex) when (IsStreamChange(ex.HResult))
+            {
+                using var availableType = transform.GetOutputAvailableType(0, 0);
+                (outputWidth, outputHeight) = MediaFoundationMediaTypeBuilder.ReadFrameSize(availableType);
+                transform.SetOutputType(0, availableType, 0);
+                outputConfigured = true;
+            }
+            catch (SharpGenException ex) when (IsNeedMoreInput(ex.HResult))
+            {
+                return null;
+            }
+        }
+    }
+
+    private static byte[]? TryProcessOutputOnce(IMFTransform transform)
     {
         var streamInfo = transform.GetOutputStreamInfo(0);
         var outputBuffer = new OutputDataBuffer
@@ -185,10 +228,6 @@ internal static class MediaFoundationTransformHelper
                 1,
                 ref outputBuffer,
                 out _);
-        }
-        catch (SharpGenException ex) when (IsNeedMoreInput(ex.HResult) || IsStreamChange(ex.HResult))
-        {
-            return null;
         }
         finally
         {

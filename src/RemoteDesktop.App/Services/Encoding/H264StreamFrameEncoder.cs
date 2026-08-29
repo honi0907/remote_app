@@ -13,6 +13,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
     private DateTime _lastEncodedUtc = DateTime.MinValue;
     private int _configuredWidth;
     private int _configuredHeight;
+    private bool _hasSentKeyframe;
 
     public StreamCodec Codec => StreamCodec.H264;
 
@@ -20,7 +21,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
     {
         var settings = HostSettingsStore.GetEffectiveSettings();
         var minInterval = TimeSpan.FromMilliseconds(1000.0 / settings.TargetFps);
-        if (DateTime.UtcNow - _lastEncodedUtc < minInterval)
+        if (_hasSentKeyframe && DateTime.UtcNow - _lastEncodedUtc < minInterval)
         {
             return Empty();
         }
@@ -46,11 +47,12 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
             var bgra = SurfaceBitmapHelper.ExtractBgra(scaledBitmap);
             var nv12 = Nv12Converter.BgraToNv12(bgra, width, height);
             var (payload, isKeyframe) = _encoder.EncodeNv12(nv12);
-            if (payload.Length == 0)
+            if (payload.Length == 0 || (!_hasSentKeyframe && !isKeyframe))
             {
                 return Empty();
             }
 
+            _hasSentKeyframe = true;
             _lastEncodedUtc = DateTime.UtcNow;
             var metadata = new FrameMetadata(width, height, DateTime.UtcNow.Ticks);
             return new EncodedStreamFrame(StreamCodec.H264, metadata, payload, isKeyframe);
@@ -78,6 +80,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
         _encoder.Initialize(width, height, fps, bitrateKbps);
         _configuredWidth = width;
         _configuredHeight = height;
+        _hasSentKeyframe = false;
     }
 
     private static int EstimateBitrateKbps(int width, int height, int fps)

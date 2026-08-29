@@ -12,6 +12,7 @@ internal sealed class H264Encoder : IDisposable
     private long _frameDuration100ns;
     private long _frameIndex;
     private bool _initialized;
+    private bool _outputConfigured;
 
     public void Initialize(int width, int height, int fps, int bitrateKbps)
     {
@@ -32,6 +33,7 @@ internal sealed class H264Encoder : IDisposable
         _fps = fps;
         _frameDuration100ns = 10_000_000 / Math.Max(1, fps);
         _frameIndex = 0;
+        _outputConfigured = true;
         _initialized = true;
     }
 
@@ -51,13 +53,17 @@ internal sealed class H264Encoder : IDisposable
         {
             try
             {
-                var output = MediaFoundationTransformHelper.TryProcessOutput(_transform);
+                var output = MediaFoundationTransformHelper.ProcessOutput(
+                    _transform,
+                    ref _outputConfigured,
+                    out _,
+                    out _);
                 if (output is null || output.Length == 0)
                 {
                     break;
                 }
 
-                return (output, H264BitstreamHelper.ContainsIdr(output));
+                return (output, H264BitstreamHelper.IsDecodableKeyframe(output));
             }
             catch (SharpGenException ex) when (MediaFoundationTransformHelper.IsNeedMoreInput(ex.HResult))
             {
@@ -77,14 +83,6 @@ internal sealed class H264Encoder : IDisposable
     {
         var stride = Nv12Converter.GetStride(width);
 
-        using var inputType = MediaFoundationMediaTypeBuilder.CreateVideoType(
-            H264MediaFoundationGuids.Nv12,
-            width,
-            height,
-            fps,
-            stride: stride);
-        transform.SetInputType(0, inputType, 0);
-
         using var outputType = MediaFoundationMediaTypeBuilder.CreateVideoType(
             H264MediaFoundationGuids.H264,
             width,
@@ -92,6 +90,14 @@ internal sealed class H264Encoder : IDisposable
             fps,
             bitrate);
         transform.SetOutputType(0, outputType, 0);
+
+        using var inputType = MediaFoundationMediaTypeBuilder.CreateVideoType(
+            H264MediaFoundationGuids.Nv12,
+            width,
+            height,
+            fps,
+            stride: stride);
+        transform.SetInputType(0, inputType, 0);
     }
 
     private void DisposeTransform()
@@ -99,108 +105,98 @@ internal sealed class H264Encoder : IDisposable
         _transform?.Dispose();
         _transform = null;
         _initialized = false;
+        _outputConfigured = false;
     }
 }
 
 internal sealed class H264Decoder : IDisposable
 {
     private IMFTransform? _transform;
-    private int _width;
-    private int _height;
+    private bool _outputConfigured;
 
     public byte[] Decode(byte[] bitstream, int width, int height)
     {
-        EnsureInitialized(width, height);
+        EnsureTransform();
 
         using var sample = MediaFoundationSampleFactory.CreateSampleFromBuffer(bitstream, 0, 0);
-        _transform!.ProcessInput(0, sample, 0);
 
-        while (true)
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            try
-            {
-                var output = MediaFoundationTransformHelper.TryProcessOutput(_transform!);
-                if (output is null || output.Length == 0)
-                {
-                    return [];
-                }
+            _transform!.ProcessInput(0, sample, 0);
+            _transform.ProcessMessage(TMessageType.MessageCommandDrain, UIntPtr.Zero);
 
-                return Nv12Converter.Nv12ToBgra(output, _width, _height);
-            }
-            catch (SharpGenException ex) when (MediaFoundationTransformHelper.IsNeedMoreInput(ex.HResult))
+            for (var outputTry = 0; outputTry < 6; outputTry++)
             {
-                return [];
+                try
+                {
+                    var output = MediaFoundationTransformHelper.ProcessOutput(
+                        _transform!,
+                        ref _outputConfigured,
+                        out _,
+                        out _);
+                    if (output is null || output.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    return Nv12Converter.Nv12ToBgra(output, width, height);
+                }
+                catch (SharpGenException ex) when (MediaFoundationTransformHelper.IsNeedMoreInput(ex.HResult))
+                {
+                    break;
+                }
             }
         }
+
+        return [];
     }
 
     public void Dispose()
     {
         _transform?.Dispose();
         _transform = null;
+        _outputConfigured = false;
     }
 
-    private void EnsureInitialized(int width, int height)
+    private void EnsureTransform()
     {
-        if (_transform is not null && _width == width && _height == height)
+        if (_transform is not null)
         {
             return;
         }
 
-        _transform?.Dispose();
         MediaFoundationRuntime.EnsureStarted();
         _transform = MediaFoundationTransformFactory.CreateTransform(H264MediaFoundationGuids.H264Decoder);
 
         using var inputType = MediaFoundationMediaTypeBuilder.CreatePartialVideoType(H264MediaFoundationGuids.H264);
         _transform.SetInputType(0, inputType, 0);
 
-        using var outputType = MediaFoundationMediaTypeBuilder.CreateVideoType(
-            H264MediaFoundationGuids.Nv12,
-            width,
-            height,
-            30,
-            stride: Nv12Converter.GetStride(width));
+        using var outputType = _transform.GetOutputAvailableType(0, 0);
         _transform.SetOutputType(0, outputType, 0);
 
         MediaFoundationTransformHelper.SendStreamMessages(_transform);
-        _width = width;
-        _height = height;
+        _outputConfigured = true;
     }
 }
 
 internal static class H264BitstreamHelper
 {
-    public static bool ContainsIdr(ReadOnlySpan<byte> data)
-    {
-        if (TryGetNalTypeAnnexB(data, out var annexType) && annexType == 5)
-        {
-            return true;
-        }
+    public static bool IsDecodableKeyframe(ReadOnlySpan<byte> data) =>
+        ContainsNalType(data, 5) || (ContainsNalType(data, 7) && ContainsNalType(data, 8));
 
-        return TryGetNalTypeAvcc(data, out var avccType) && avccType == 5;
-    }
+    public static bool ContainsIdr(ReadOnlySpan<byte> data) => ContainsNalType(data, 5);
 
-    private static bool TryGetNalTypeAnnexB(ReadOnlySpan<byte> data, out int nalType)
+    private static bool ContainsNalType(ReadOnlySpan<byte> data, int nalType)
     {
-        nalType = 0;
         for (var i = 0; i + 4 < data.Length; i++)
         {
             if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1)
             {
-                nalType = data[i + 3] & 0x1F;
-                return true;
+                if ((data[i + 3] & 0x1F) == nalType)
+                {
+                    return true;
+                }
             }
-        }
-
-        return false;
-    }
-
-    private static bool TryGetNalTypeAvcc(ReadOnlySpan<byte> data, out int nalType)
-    {
-        nalType = 0;
-        if (data.Length < 5)
-        {
-            return false;
         }
 
         var offset = 0;
@@ -213,13 +209,12 @@ internal static class H264BitstreamHelper
                 data[offset + 3];
             offset += 4;
 
-            if (nalLength == 0 || offset + nalLength > data.Length)
+            if (nalLength <= 0 || offset + nalLength > data.Length)
             {
-                return false;
+                break;
             }
 
-            nalType = data[offset] & 0x1F;
-            if (nalType == 5)
+            if ((data[offset] & 0x1F) == nalType)
             {
                 return true;
             }

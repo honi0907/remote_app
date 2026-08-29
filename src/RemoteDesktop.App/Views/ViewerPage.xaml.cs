@@ -193,10 +193,20 @@ public sealed partial class ViewerPage : Page
                             continue;
                         }
 
-                        var bitmap = new WriteableBitmap(pending.Metadata.Width, pending.Metadata.Height);
-                        using (var pixelStream = bitmap.PixelBuffer.AsStream())
+                        var width = pending.Metadata.Width;
+                        var height = pending.Metadata.Height;
+                        var bitmap = new WriteableBitmap(width, height);
+                        var pixelBuffer = bitmap.PixelBuffer;
+                        var destStride = width * 4;
+                        using (var stream = pixelBuffer.AsStream())
                         {
-                            pixelStream.Write(bgra, 0, bgra.Length);
+                            if (destStride == width * 4)
+                            {
+                                for (var row = 0; row < height; row++)
+                                {
+                                    stream.Write(bgra, row * destStride, destStride);
+                                }
+                            }
                         }
 
                         bitmap.Invalidate();
