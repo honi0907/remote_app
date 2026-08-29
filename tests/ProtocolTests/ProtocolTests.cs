@@ -11,6 +11,8 @@ public static class ProtocolTests
         TestConnectionRequestRoundTrip();
         TestMouseMoveRoundTrip();
         TestFrameRoundTrip();
+        TestStreamConfigRoundTrip();
+        TestVideoFrameRoundTrip();
         TestMessageReader();
         TestCoordinateMapper();
         Console.WriteLine("All protocol tests passed.");
@@ -61,6 +63,35 @@ public static class ProtocolTests
             !parsedJpeg.SequenceEqual(jpeg))
         {
             throw new InvalidOperationException("Frame round-trip failed.");
+        }
+    }
+
+    private static void TestStreamConfigRoundTrip()
+    {
+        var config = new StreamConfigMessage(StreamCodec.H264, 24, 1280, 55);
+        var bytes = MessageSerializer.BuildStreamConfig(config);
+        var parsed = MessageSerializer.ParseStreamConfig(bytes);
+        if (parsed.Codec != config.Codec ||
+            parsed.TargetFps != config.TargetFps ||
+            parsed.MaxCaptureWidth != config.MaxCaptureWidth ||
+            parsed.JpegQuality != config.JpegQuality)
+        {
+            throw new InvalidOperationException("Stream config round-trip failed.");
+        }
+    }
+
+    private static void TestVideoFrameRoundTrip()
+    {
+        var metadata = new FrameMetadata(1280, 720, DateTime.UtcNow.Ticks);
+        var h264 = new byte[] { 0x00, 0x00, 0x00, 0x01, 0x65 };
+        var bytes = MessageSerializer.BuildVideoFrame(metadata, h264, isKeyframe: true);
+        var (parsedMetadata, parsedH264, isKeyframe) = MessageSerializer.ParseVideoFrame(bytes);
+        if (parsedMetadata.Width != metadata.Width ||
+            parsedMetadata.Height != metadata.Height ||
+            !isKeyframe ||
+            !parsedH264.SequenceEqual(h264))
+        {
+            throw new InvalidOperationException("Video frame round-trip failed.");
         }
     }
 

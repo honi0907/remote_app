@@ -1,3 +1,5 @@
+using RemoteDesktop.App.Protocol;
+
 namespace RemoteDesktop.App.Services;
 
 public enum StreamQualityPreset
@@ -19,6 +21,8 @@ public sealed class StreamSettings
 
     public StreamQualityPreset Preset { get; set; } = StreamQualityPreset.Responsive;
 
+    public StreamDeliveryMode DeliveryMode { get; set; } = StreamDeliveryMode.Auto;
+
     public int TargetFps { get; set; } = DefaultResponsiveFps;
 
     /// <summary>0 = native capture resolution.</summary>
@@ -29,6 +33,7 @@ public sealed class StreamSettings
     public StreamSettings Clone() => new()
     {
         Preset = Preset,
+        DeliveryMode = DeliveryMode,
         TargetFps = TargetFps,
         MaxCaptureWidth = MaxCaptureWidth,
         JpegQuality = JpegQuality,
@@ -36,11 +41,12 @@ public sealed class StreamSettings
 
     public StreamSettings ResolveEffective()
     {
-        return Preset switch
+        var resolved = Preset switch
         {
             StreamQualityPreset.Responsive => new StreamSettings
             {
                 Preset = Preset,
+                DeliveryMode = DeliveryMode,
                 TargetFps = DefaultResponsiveFps,
                 MaxCaptureWidth = DefaultResponsiveMaxWidth,
                 JpegQuality = DefaultResponsiveJpegQuality,
@@ -48,6 +54,7 @@ public sealed class StreamSettings
             StreamQualityPreset.Quality => new StreamSettings
             {
                 Preset = Preset,
+                DeliveryMode = DeliveryMode,
                 TargetFps = DefaultQualityFps,
                 MaxCaptureWidth = DefaultQualityMaxWidth,
                 JpegQuality = DefaultQualityJpegQuality,
@@ -55,6 +62,8 @@ public sealed class StreamSettings
             StreamQualityPreset.Manual => Clone(),
             _ => throw new ArgumentOutOfRangeException(nameof(Preset), Preset, null),
         };
+
+        return resolved;
     }
 
     public static StreamSettings CreateDefault() => new();

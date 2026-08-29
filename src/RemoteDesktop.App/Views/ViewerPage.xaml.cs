@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Navigation;
 using RemoteDesktop.App.Helpers;
 using RemoteDesktop.App.Protocol;
 using RemoteDesktop.App.Services;
+using RemoteDesktop.App.Services.StreamEncoding;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
 using Windows.Storage.Streams;
@@ -18,6 +19,7 @@ public sealed partial class ViewerPage : Page
 {
     private readonly LanDiscoveryService _discovery = new();
     private readonly SessionClient _sessionClient = new();
+    private readonly H264StreamFrameDecoder _h264Decoder = new();
     private readonly DispatcherQueueTimer _pingTimer;
     private readonly DispatcherQueueTimer _fpsTimer;
     private CancellationTokenSource? _cts;
@@ -27,8 +29,9 @@ public sealed partial class ViewerPage : Page
     private DateTime _fpsWindowStart = DateTime.UtcNow;
     private bool _isConnected;
     private bool _isPointerCaptured;
-    private (FrameMetadata Metadata, byte[] Jpeg)? _latestFrame;
+    private (FrameMetadata Metadata, byte[] Payload, StreamCodec Codec)? _latestFrame;
     private int _renderInProgress;
+    private StreamCodec _activeCodec = StreamCodec.Jpeg;
 
     public ViewerPage()
     {
@@ -42,7 +45,8 @@ public sealed partial class ViewerPage : Page
         _fpsTimer.Tick += FpsTimer_Tick;
 
         _discovery.HostsChanged += OnHostsChanged;
-        _sessionClient.FrameReceived += OnFrameReceived;
+        _sessionClient.StreamFrameReceived += OnStreamFrameReceived;
+        _sessionClient.StreamConfigReceived += OnStreamConfigReceived;
         _sessionClient.LatencyMeasured += OnLatencyMeasured;
         _sessionClient.Disconnected += OnDisconnected;
     }
@@ -61,6 +65,7 @@ public sealed partial class ViewerPage : Page
         _fpsTimer.Stop();
         _cts?.Cancel();
         await _sessionClient.DisposeAsync();
+        _h264Decoder.Dispose();
         await _discovery.DisposeAsync();
         _cts?.Dispose();
         _cts = null;
@@ -150,10 +155,15 @@ public sealed partial class ViewerPage : Page
         }
     }
 
-    private void OnFrameReceived(object? sender, (FrameMetadata Metadata, byte[] Jpeg) frame)
+    private void OnStreamConfigReceived(object? sender, StreamConfigMessage config)
+    {
+        _activeCodec = config.Codec;
+    }
+
+    private void OnStreamFrameReceived(object? sender, EncodedStreamFrame frame)
     {
         _frameCount++;
-        _latestFrame = frame;
+        _latestFrame = (frame.Metadata, frame.Payload, frame.Codec);
         TryRenderLatestFrame();
     }
 
@@ -174,13 +184,34 @@ public sealed partial class ViewerPage : Page
                     _sourceWidth = pending.Metadata.Width;
                     _sourceHeight = pending.Metadata.Height;
 
-                    using var stream = new InMemoryRandomAccessStream();
-                    await stream.WriteAsync(pending.Jpeg.AsBuffer());
-                    stream.Seek(0);
+                    if (pending.Codec == StreamCodec.H264)
+                    {
+                        var encoded = new EncodedStreamFrame(StreamCodec.H264, pending.Metadata, pending.Payload, true);
+                        var bgra = _h264Decoder.Decode(encoded);
+                        if (bgra.Length == 0)
+                        {
+                            continue;
+                        }
 
-                    var bitmap = new BitmapImage();
-                    await bitmap.SetSourceAsync(stream);
-                    RemoteImage.Source = bitmap;
+                        var bitmap = new WriteableBitmap(pending.Metadata.Width, pending.Metadata.Height);
+                        using (var pixelStream = bitmap.PixelBuffer.AsStream())
+                        {
+                            pixelStream.Write(bgra, 0, bgra.Length);
+                        }
+
+                        bitmap.Invalidate();
+                        RemoteImage.Source = bitmap;
+                    }
+                    else
+                    {
+                        using var stream = new InMemoryRandomAccessStream();
+                        await stream.WriteAsync(pending.Payload.AsBuffer());
+                        stream.Seek(0);
+
+                        var bitmap = new BitmapImage();
+                        await bitmap.SetSourceAsync(stream);
+                        RemoteImage.Source = bitmap;
+                    }
                 }
             }
             finally

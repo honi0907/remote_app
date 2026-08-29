@@ -9,7 +9,7 @@ public sealed class SessionServer : IAsyncDisposable
     private readonly MessageReader _reader = new();
     private readonly object _clientSync = new();
     private readonly object _frameSendSync = new();
-    private (FrameMetadata Metadata, byte[] Jpeg)? _latestFrame;
+    private EncodedStreamFrame? _latestFrame;
     private Task? _frameSendTask;
     private TcpListener? _listener;
     private TcpClient? _client;
@@ -88,9 +88,14 @@ public sealed class SessionServer : IAsyncDisposable
         }
     }
 
-    public async Task SendFrameAsync(FrameMetadata metadata, byte[] jpeg)
+    public async Task SendStreamConfigAsync(StreamConfigMessage config)
     {
-        if (jpeg.Length == 0)
+        await WriteAsync(MessageSerializer.BuildStreamConfig(config));
+    }
+
+    public async Task SendFrameAsync(EncodedStreamFrame frame)
+    {
+        if (frame.Payload.Length == 0)
         {
             return;
         }
@@ -111,20 +116,26 @@ public sealed class SessionServer : IAsyncDisposable
             return;
         }
 
-        var message = MessageSerializer.BuildFrame(metadata, jpeg);
+        var message = frame.Codec switch
+        {
+            StreamCodec.H264 => MessageSerializer.BuildVideoFrame(frame.Metadata, frame.Payload, frame.IsKeyframe),
+            StreamCodec.Jpeg => MessageSerializer.BuildFrame(frame.Metadata, frame.Payload),
+            StreamCodec.H265 => MessageSerializer.BuildVideoFrame(frame.Metadata, frame.Payload, frame.IsKeyframe),
+            _ => MessageSerializer.BuildFrame(frame.Metadata, frame.Payload),
+        };
         await stream.WriteAsync(message);
     }
 
-    public void QueueFrame(FrameMetadata metadata, byte[] jpeg)
+    public void QueueFrame(EncodedStreamFrame frame)
     {
-        if (jpeg.Length == 0)
+        if (frame.Payload.Length == 0)
         {
             return;
         }
 
         lock (_frameSendSync)
         {
-            _latestFrame = (metadata, jpeg);
+            _latestFrame = frame;
             if (_frameSendTask is null || _frameSendTask.IsCompleted)
             {
                 _frameSendTask = Task.Run(SendLatestFrameLoopAsync);
@@ -330,7 +341,7 @@ public sealed class SessionServer : IAsyncDisposable
         {
             while (true)
             {
-                (FrameMetadata Metadata, byte[] Jpeg) frame;
+                EncodedStreamFrame frame;
                 lock (_frameSendSync)
                 {
                     if (_latestFrame is null)
@@ -343,7 +354,7 @@ public sealed class SessionServer : IAsyncDisposable
                     _latestFrame = null;
                 }
 
-                await SendFrameAsync(frame.Metadata, frame.Jpeg);
+                await SendFrameAsync(frame);
             }
         }
         catch (Exception)

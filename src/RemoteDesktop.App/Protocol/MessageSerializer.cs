@@ -30,6 +30,28 @@ public static class MessageSerializer
         return Wrap(MessageType.Frame, payload);
     }
 
+    public static byte[] BuildStreamConfig(StreamConfigMessage config)
+    {
+        var payload = new byte[8];
+        payload[0] = (byte)config.Codec;
+        payload[1] = (byte)Math.Clamp(config.TargetFps, 1, 255);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(2, 2), (short)Math.Clamp(config.MaxCaptureWidth, 0, short.MaxValue));
+        payload[4] = (byte)Math.Clamp(config.JpegQuality, 1, 255);
+        return Wrap(MessageType.StreamConfig, payload);
+    }
+
+    public static byte[] BuildVideoFrame(FrameMetadata metadata, byte[] h264Bytes, bool isKeyframe)
+    {
+        var payload = new byte[21 + h264Bytes.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), metadata.Width);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), metadata.Height);
+        BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(8, 8), metadata.TimestampUtcTicks);
+        payload[16] = (byte)(isKeyframe ? 1 : 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(17, 4), h264Bytes.Length);
+        h264Bytes.CopyTo(payload.AsSpan(21));
+        return Wrap(MessageType.VideoFrame, payload);
+    }
+
     public static byte[] BuildMouseMove(MouseMoveMessage message)
     {
         var payload = new byte[16];
@@ -115,6 +137,35 @@ public static class MessageSerializer
         var jpegLength = BinaryPrimitives.ReadInt32LittleEndian(body[16..20]);
         var jpeg = body[20..(20 + jpegLength)].ToArray();
         return (new FrameMetadata(width, height, timestamp), jpeg);
+    }
+
+    public static StreamConfigMessage ParseStreamConfig(ReadOnlySpan<byte> payload)
+    {
+        var body = Payload(payload);
+        if (body.Length < 5)
+        {
+            return new StreamConfigMessage(StreamCodec.Jpeg, 24, 1280, 55);
+        }
+
+        var codec = Enum.IsDefined(typeof(StreamCodec), body[0])
+            ? (StreamCodec)body[0]
+            : StreamCodec.Jpeg;
+        var fps = body[1];
+        var maxWidth = BinaryPrimitives.ReadInt16LittleEndian(body[2..4]);
+        var quality = body[4];
+        return new StreamConfigMessage(codec, fps, maxWidth, quality);
+    }
+
+    public static (FrameMetadata Metadata, byte[] H264, bool IsKeyframe) ParseVideoFrame(ReadOnlySpan<byte> payload)
+    {
+        var body = Payload(payload);
+        var width = BinaryPrimitives.ReadInt32LittleEndian(body[..4]);
+        var height = BinaryPrimitives.ReadInt32LittleEndian(body[4..8]);
+        var timestamp = BinaryPrimitives.ReadInt64LittleEndian(body[8..16]);
+        var isKeyframe = body[16] == 1;
+        var dataLength = BinaryPrimitives.ReadInt32LittleEndian(body[17..21]);
+        var h264 = body[21..(21 + dataLength)].ToArray();
+        return (new FrameMetadata(width, height, timestamp), h264, isKeyframe);
     }
 
     public static MouseMoveMessage ParseMouseMove(ReadOnlySpan<byte> payload)

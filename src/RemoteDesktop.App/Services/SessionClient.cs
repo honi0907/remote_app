@@ -18,7 +18,8 @@ public sealed class SessionClient : IAsyncDisposable
     private bool _mouseMovePending;
     private bool _mouseFlushScheduled;
 
-    public event EventHandler<(FrameMetadata Metadata, byte[] Jpeg)>? FrameReceived;
+    public event EventHandler<EncodedStreamFrame>? StreamFrameReceived;
+    public event EventHandler<StreamConfigMessage>? StreamConfigReceived;
     public event EventHandler<long>? LatencyMeasured;
     public event EventHandler? Disconnected;
     public event EventHandler<ConnectionResponseKind>? ConnectionResponseReceived;
@@ -199,9 +200,18 @@ public sealed class SessionClient : IAsyncDisposable
                 _authTcs?.TrySetResult(MessageSerializer.ParseAuthResponse(message));
                 break;
 
+            case MessageType.StreamConfig:
+                StreamConfigReceived?.Invoke(this, MessageSerializer.ParseStreamConfig(message));
+                break;
+
             case MessageType.Frame:
-                var (metadata, jpeg) = MessageSerializer.ParseFrame(message);
-                FrameReceived?.Invoke(this, (metadata, jpeg));
+                var (jpegMetadata, jpeg) = MessageSerializer.ParseFrame(message);
+                StreamFrameReceived?.Invoke(this, new EncodedStreamFrame(StreamCodec.Jpeg, jpegMetadata, jpeg, true));
+                break;
+
+            case MessageType.VideoFrame:
+                var (videoMetadata, h264, isKeyframe) = MessageSerializer.ParseVideoFrame(message);
+                StreamFrameReceived?.Invoke(this, new EncodedStreamFrame(StreamCodec.H264, videoMetadata, h264, isKeyframe));
                 break;
 
             case MessageType.Pong:

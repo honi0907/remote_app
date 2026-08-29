@@ -71,6 +71,13 @@ public sealed partial class HostPage : Page
         _isLoadingSettings = true;
         var settings = HostSettingsStore.Load();
 
+        DeliveryModeComboBox.SelectedIndex = settings.DeliveryMode switch
+        {
+            StreamDeliveryMode.H264 => 1,
+            StreamDeliveryMode.Jpeg => 2,
+            _ => 0,
+        };
+
         PresetComboBox.SelectedIndex = settings.Preset switch
         {
             StreamQualityPreset.Responsive => 0,
@@ -88,6 +95,16 @@ public sealed partial class HostPage : Page
 
         UpdateEffectiveSettingsText();
         _isLoadingSettings = false;
+    }
+
+    private void DeliveryModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoadingSettings)
+        {
+            return;
+        }
+
+        SaveCurrentSettings();
     }
 
     private void PresetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -108,7 +125,44 @@ public sealed partial class HostPage : Page
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        SaveSettingsFromUi(preset);
+        SaveCurrentSettings();
+    }
+
+    private void SaveCurrentSettings()
+    {
+        var preset = PresetComboBox.SelectedItem is ComboBoxItem presetItem
+            ? presetItem.Tag?.ToString() switch
+            {
+                "Quality" => StreamQualityPreset.Quality,
+                "Manual" => StreamQualityPreset.Manual,
+                _ => StreamQualityPreset.Responsive,
+            }
+            : StreamQualityPreset.Responsive;
+
+        ManualSettingsPanel.Visibility = preset == StreamQualityPreset.Manual
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        var deliveryMode = DeliveryModeComboBox.SelectedItem is ComboBoxItem deliveryItem
+            ? deliveryItem.Tag?.ToString() switch
+            {
+                "H264" => StreamDeliveryMode.H264,
+                "Jpeg" => StreamDeliveryMode.Jpeg,
+                _ => StreamDeliveryMode.Auto,
+            }
+            : StreamDeliveryMode.Auto;
+
+        var settings = new StreamSettings
+        {
+            Preset = preset,
+            DeliveryMode = deliveryMode,
+            TargetFps = ReadNumberBox(FpsNumberBox, StreamSettings.DefaultResponsiveFps, 10, 30),
+            MaxCaptureWidth = ReadNumberBox(MaxWidthNumberBox, StreamSettings.DefaultResponsiveMaxWidth, 0, 3840),
+            JpegQuality = ReadNumberBox(QualityNumberBox, StreamSettings.DefaultResponsiveJpegQuality, 30, 95),
+        };
+
+        HostSettingsStore.Save(settings);
+        UpdateEffectiveSettingsText();
     }
 
     private void ManualSetting_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -118,21 +172,7 @@ public sealed partial class HostPage : Page
             return;
         }
 
-        SaveSettingsFromUi(StreamQualityPreset.Manual);
-    }
-
-    private void SaveSettingsFromUi(StreamQualityPreset preset)
-    {
-        var settings = new StreamSettings
-        {
-            Preset = preset,
-            TargetFps = ReadNumberBox(FpsNumberBox, StreamSettings.DefaultResponsiveFps, 10, 30),
-            MaxCaptureWidth = ReadNumberBox(MaxWidthNumberBox, StreamSettings.DefaultResponsiveMaxWidth, 0, 3840),
-            JpegQuality = ReadNumberBox(QualityNumberBox, StreamSettings.DefaultResponsiveJpegQuality, 30, 95),
-        };
-
-        HostSettingsStore.Save(settings);
-        UpdateEffectiveSettingsText();
+        SaveCurrentSettings();
     }
 
     private static int ReadNumberBox(NumberBox box, int fallback, int min, int max)
@@ -150,8 +190,16 @@ public sealed partial class HostPage : Page
     {
         var effective = HostSettingsStore.GetEffectiveSettings();
         var widthLabel = effective.MaxCaptureWidth <= 0 ? "フル解像度" : $"{effective.MaxCaptureWidth}px 幅";
+        var settings = HostSettingsStore.Load();
+        var codecLabel = settings.DeliveryMode switch
+        {
+            StreamDeliveryMode.H264 => "H.264",
+            StreamDeliveryMode.Jpeg => "JPEG",
+            StreamDeliveryMode.H265 => "H.265",
+            _ => "自動(H.264優先)",
+        };
         EffectiveSettingsText.Text =
-            $"現在の配信: FPS {effective.TargetFps} / {widthLabel} / JPEG {effective.JpegQuality}";
+            $"現在の配信: {codecLabel} / FPS {effective.TargetFps} / {widthLabel} / JPEG {effective.JpegQuality}";
     }
 
     private void OnClientConnectionRequested(object? sender, string viewerName)
@@ -179,9 +227,14 @@ public sealed partial class HostPage : Page
         {
             try
             {
-                StatusText.Text = "クライアント接続済み - 画面共有中";
-                ConnectedClientText.Text = "接続中のクライアント: 1";
+                var settings = HostSettingsStore.Load();
+                _screenCapture.ConfigureEncoder(settings.DeliveryMode);
+                await _sessionServer.SendStreamConfigAsync(_screenCapture.CreateStreamConfig());
                 await _screenCapture.StartAsync(_cts?.Token ?? CancellationToken.None);
+
+                var codecLabel = _screenCapture.ActiveCodec == StreamCodec.H264 ? "H.264" : "JPEG";
+                StatusText.Text = $"クライアント接続済み - 画面共有中 ({codecLabel})";
+                ConnectedClientText.Text = "接続中のクライアント: 1";
             }
             catch (Exception ex)
             {
@@ -212,14 +265,14 @@ public sealed partial class HostPage : Page
         });
     }
 
-    private void OnFrameCaptured(object? sender, (FrameMetadata Metadata, byte[] Jpeg) frame)
+    private void OnFrameCaptured(object? sender, EncodedStreamFrame frame)
     {
         if (!_sessionServer.HasAuthenticatedClient)
         {
             return;
         }
 
-        _sessionServer.QueueFrame(frame.Metadata, frame.Jpeg);
+        _sessionServer.QueueFrame(frame);
 
         _frameCount++;
         var elapsed = DateTime.UtcNow - _fpsWindowStart;

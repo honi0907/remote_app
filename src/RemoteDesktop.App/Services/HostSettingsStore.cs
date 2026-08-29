@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using RemoteDesktop.App.Protocol;
+
 namespace RemoteDesktop.App.Services;
 
 public static class HostSettingsStore
@@ -50,5 +52,10 @@ public static class HostSettingsStore
         }
     }
 
-    public static StreamSettings GetEffectiveSettings() => Load().ResolveEffective();
+    public static StreamSettings GetEffectiveSettings()
+    {
+        var settings = Load().ResolveEffective();
+        settings.DeliveryMode = Load().DeliveryMode;
+        return settings;
+    }
 }

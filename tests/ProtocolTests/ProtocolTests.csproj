@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\src\RemoteDesktop.App\Protocol\Messages.cs" Link="Protocol\Messages.cs" />
+    <Compile Include="..\..\src\RemoteDesktop.App\Protocol\StreamCodec.cs" Link="Protocol\StreamCodec.cs" />
     <Compile Include="..\..\src\RemoteDesktop.App\Protocol\MessageSerializer.cs" Link="Protocol\MessageSerializer.cs" />
     <Compile Include="..\..\src\RemoteDesktop.App\Helpers\CoordinateMapper.cs" Link="Helpers\CoordinateMapper.cs" />
   </ItemGroup>

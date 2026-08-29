@@ -21,6 +21,8 @@ public enum MessageType : byte
     Pong = 10,
     ConnectionRequest = 11,
     ConnectionResponse = 12,
+    StreamConfig = 13,
+    VideoFrame = 14,
 }
 
 public enum MouseButtonKind : byte

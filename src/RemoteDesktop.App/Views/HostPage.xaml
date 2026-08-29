@@ -35,6 +35,14 @@
                 <StackPanel Spacing="12">
                     <TextBlock Text="配信設定" FontWeight="SemiBold" />
                     <ComboBox
+                        x:Name="DeliveryModeComboBox"
+                        HorizontalAlignment="Stretch"
+                        SelectionChanged="DeliveryModeComboBox_SelectionChanged">
+                        <ComboBoxItem Content="自動（H.264優先・JPEGフォールバック）" Tag="Auto" />
+                        <ComboBoxItem Content="H.264（GPU）" Tag="H264" />
+                        <ComboBoxItem Content="JPEG（互換モード）" Tag="Jpeg" />
+                    </ComboBox>
+                    <ComboBox
                         x:Name="PresetComboBox"
                         HorizontalAlignment="Stretch"
                         SelectionChanged="PresetComboBox_SelectionChanged">

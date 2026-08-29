@@ -1,42 +1,44 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 using RemoteDesktop.App.Protocol;
+using RemoteDesktop.App.Services;
 using Windows.Graphics.DirectX.Direct3D11;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 
-namespace RemoteDesktop.App.Services;
+namespace RemoteDesktop.App.Services.StreamEncoding;
 
-public readonly record struct EncodedFrame(byte[] Jpeg, int Width, int Height);
-
-public sealed class FrameEncoder : IDisposable
+public sealed class JpegStreamFrameEncoder : IStreamFrameEncoder
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DateTime _lastEncodedUtc = DateTime.MinValue;
 
-    public EncodedFrame EncodeFrame(IDirect3DSurface surface, int width, int height)
+    public StreamCodec Codec => StreamCodec.Jpeg;
+
+    public EncodedStreamFrame EncodeFrame(IDirect3DSurface surface, int sourceWidth, int sourceHeight)
     {
         var settings = HostSettingsStore.GetEffectiveSettings();
         var minInterval = TimeSpan.FromMilliseconds(1000.0 / settings.TargetFps);
         if (DateTime.UtcNow - _lastEncodedUtc < minInterval)
         {
-            return new EncodedFrame([], 0, 0);
+            return Empty();
         }
 
         if (!_gate.Wait(0))
         {
-            return new EncodedFrame([], 0, 0);
+            return Empty();
         }
 
         try
         {
-            var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(surface).AsTask().GetAwaiter().GetResult();
-            using (bitmap)
-            {
-                var (scaledWidth, scaledHeight) = GetScaledDimensions(width, height, settings.MaxCaptureWidth);
-                var jpeg = EncodeJpeg(bitmap, scaledWidth, scaledHeight, settings);
-                _lastEncodedUtc = DateTime.UtcNow;
-                return new EncodedFrame(jpeg, (int)scaledWidth, (int)scaledHeight);
-            }
+            using var bitmap = SurfaceBitmapHelper.CopySurfaceToBitmap(surface);
+            var (scaledWidth, scaledHeight) = SurfaceBitmapHelper.GetScaledDimensions(
+                sourceWidth,
+                sourceHeight,
+                settings.MaxCaptureWidth);
+            var jpeg = EncodeJpeg(bitmap, (uint)scaledWidth, (uint)scaledHeight, settings);
+            _lastEncodedUtc = DateTime.UtcNow;
+            var metadata = new FrameMetadata(scaledWidth, scaledHeight, DateTime.UtcNow.Ticks);
+            return new EncodedStreamFrame(StreamCodec.Jpeg, metadata, jpeg, true);
         }
         finally
         {
@@ -45,6 +47,9 @@ public sealed class FrameEncoder : IDisposable
     }
 
     public void Dispose() => _gate.Dispose();
+
+    private static EncodedStreamFrame Empty() =>
+        new(StreamCodec.Jpeg, new FrameMetadata(0, 0, 0), [], false);
 
     private static byte[] EncodeJpeg(SoftwareBitmap bitmap, uint scaledWidth, uint scaledHeight, StreamSettings settings)
     {
@@ -76,17 +81,5 @@ public sealed class FrameEncoder : IDisposable
         var output = new byte[stream.Size];
         stream.ReadAsync(output.AsBuffer(), (uint)output.Length, InputStreamOptions.None).AsTask().GetAwaiter().GetResult();
         return output;
-    }
-
-    private static (uint Width, uint Height) GetScaledDimensions(int sourceWidth, int sourceHeight, int maxWidth)
-    {
-        if (maxWidth <= 0 || sourceWidth <= maxWidth)
-        {
-            return ((uint)sourceWidth, (uint)sourceHeight);
-        }
-
-        var scale = (double)maxWidth / sourceWidth;
-        var scaledHeight = (uint)Math.Max(1, Math.Round(sourceHeight * scale));
-        return ((uint)maxWidth, scaledHeight);
     }
 }

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using RemoteDesktop.App.Protocol;
+using RemoteDesktop.App.Services.StreamEncoding;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
@@ -7,14 +8,14 @@ using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
-using Windows.Graphics.Imaging;
 using WinRT;
 
 namespace RemoteDesktop.App.Services;
 
 public sealed class ScreenCaptureService : IAsyncDisposable
 {
-    private readonly FrameEncoder _frameEncoder = new();
+    private IStreamFrameEncoder? _frameEncoder;
+    private StreamCodec _activeCodec = StreamCodec.Jpeg;
     private GraphicsCaptureItem? _captureItem;
     private Direct3D11CaptureFramePool? _framePool;
     private GraphicsCaptureSession? _session;
@@ -24,8 +25,25 @@ public sealed class ScreenCaptureService : IAsyncDisposable
 
     public int CaptureWidth => _captureSize.Width;
     public int CaptureHeight => _captureSize.Height;
+    public StreamCodec ActiveCodec => _activeCodec;
 
-    public event EventHandler<(FrameMetadata Metadata, byte[] Jpeg)>? FrameCaptured;
+    public event EventHandler<EncodedStreamFrame>? FrameCaptured;
+
+    public void ConfigureEncoder(StreamDeliveryMode deliveryMode)
+    {
+        _frameEncoder?.Dispose();
+        _frameEncoder = StreamFrameEncoderFactory.Create(deliveryMode, out _activeCodec);
+    }
+
+    public StreamConfigMessage CreateStreamConfig()
+    {
+        var effective = HostSettingsStore.GetEffectiveSettings();
+        return new StreamConfigMessage(
+            _activeCodec,
+            effective.TargetFps,
+            effective.MaxCaptureWidth,
+            effective.JpegQuality);
+    }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -33,6 +51,8 @@ public sealed class ScreenCaptureService : IAsyncDisposable
         {
             return;
         }
+
+        _frameEncoder ??= StreamFrameEncoderFactory.Create(StreamDeliveryMode.Auto, out _activeCodec);
 
         var monitorHandle = MonitorHelper.GetPrimaryMonitorHandle();
         _captureItem = MonitorHelper.CreateItemForMonitor(monitorHandle);
@@ -76,13 +96,14 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
-        _frameEncoder.Dispose();
+        _frameEncoder?.Dispose();
+        _frameEncoder = null;
     }
 
     private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
     {
         using var frame = sender.TryGetNextFrame();
-        if (frame is null)
+        if (frame is null || _frameEncoder is null)
         {
             return;
         }
@@ -90,10 +111,9 @@ public sealed class ScreenCaptureService : IAsyncDisposable
         try
         {
             var encoded = _frameEncoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
-            if (encoded.Jpeg.Length > 0)
+            if (encoded.Payload.Length > 0)
             {
-                var metadata = new FrameMetadata(encoded.Width, encoded.Height, DateTime.UtcNow.Ticks);
-                FrameCaptured?.Invoke(this, (metadata, encoded.Jpeg));
+                FrameCaptured?.Invoke(this, encoded);
             }
         }
         catch (Exception)
