@@ -13,6 +13,9 @@ public sealed class H264StreamFrameDecoder : IDisposable
     private readonly H264Decoder _decoder = new();
     private int _pendingWarmupFrames;
 
+    public string? LastError => _decoder.LastError;
+    public int PendingWarmupFrames => _pendingWarmupFrames;
+
     public DecodedVideoFrame Decode(EncodedStreamFrame frame)
     {
         if (frame.Codec != StreamCodec.H264 || frame.Payload.Length == 0)
@@ -27,15 +30,15 @@ public sealed class H264StreamFrameDecoder : IDisposable
             return new DecodedVideoFrame(bgra, width, height);
         }
 
-        if (_pendingWarmupFrames < 30)
-        {
-            _pendingWarmupFrames++;
-        }
-
+        _pendingWarmupFrames++;
         return new DecodedVideoFrame([], 0, 0);
     }
 
-    public void Reset() => _pendingWarmupFrames = 0;
+    public void Reset()
+    {
+        _pendingWarmupFrames = 0;
+        _decoder.Reset();
+    }
 
     public void Dispose() => _decoder.Dispose();
 }

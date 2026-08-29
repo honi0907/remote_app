@@ -26,6 +26,7 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     public int CaptureWidth => _captureSize.Width;
     public int CaptureHeight => _captureSize.Height;
     public StreamCodec ActiveCodec => _activeCodec;
+    public string? LastEncodeError { get; private set; }
 
     public event EventHandler<EncodedStreamFrame>? FrameCaptured;
 
@@ -113,12 +114,13 @@ public sealed class ScreenCaptureService : IAsyncDisposable
             var encoded = _frameEncoder.EncodeFrame(frame.Surface, _captureSize.Width, _captureSize.Height);
             if (encoded.Payload.Length > 0)
             {
+                LastEncodeError = null;
                 FrameCaptured?.Invoke(this, encoded);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Skip frames that cannot be encoded (protected content, transient GPU errors).
+            LastEncodeError = ex.Message;
         }
     }
 }

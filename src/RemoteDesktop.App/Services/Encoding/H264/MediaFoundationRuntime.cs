@@ -95,7 +95,7 @@ internal static class MediaFoundationMediaTypeBuilder
         if (bitrate > 0)
         {
             mediaType.Set(MediaTypeAttributeKeys.AvgBitrate, (uint)bitrate);
-            mediaType.Set(MediaTypeAttributeKeys.MaxKeyframeSpacing, (ulong)(10_000_000 / Math.Max(1, fps)));
+            mediaType.Set(MediaTypeAttributeKeys.MaxKeyframeSpacing, 8u);
         }
 
         return mediaType;

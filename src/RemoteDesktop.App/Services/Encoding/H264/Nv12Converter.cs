@@ -6,14 +6,15 @@ internal static class Nv12Converter
 
     public static int GetBufferSize(int width, int height) => GetStride(width) * height * 3 / 2;
 
-    public static bool TryResolveDimensions(
+    public static bool TryResolveLayout(
         int bufferLength,
         int preferredWidth,
         int preferredHeight,
         int fallbackWidth,
         int fallbackHeight,
         out int width,
-        out int height)
+        out int height,
+        out int stride)
     {
         foreach (var (candidateWidth, candidateHeight) in new[]
                  {
@@ -21,9 +22,7 @@ internal static class Nv12Converter
                      (fallbackWidth, fallbackHeight),
                  })
         {
-            if (candidateWidth > 0 &&
-                candidateHeight > 0 &&
-                bufferLength == GetBufferSize(candidateWidth, candidateHeight))
+            if (TryMatch(bufferLength, candidateWidth, candidateHeight, out stride))
             {
                 width = candidateWidth;
                 height = candidateHeight;
@@ -31,22 +30,35 @@ internal static class Nv12Converter
             }
         }
 
-        var widthGuess = preferredWidth > 0 ? preferredWidth : fallbackWidth;
-        if (widthGuess > 0)
+        width = 0;
+        height = 0;
+        stride = 0;
+        return false;
+    }
+
+    private static bool TryMatch(int bufferLength, int width, int height, out int stride)
+    {
+        stride = 0;
+        if (width <= 0 || height <= 0 || bufferLength <= 0)
         {
-            var stride = GetStride(widthGuess);
-            var heightGuess = bufferLength * 2 / (stride * 3);
-            if (heightGuess > 0 && bufferLength == GetBufferSize(widthGuess, heightGuess))
-            {
-                width = widthGuess;
-                height = heightGuess;
-                return true;
-            }
+            return false;
         }
 
-        width = fallbackWidth;
-        height = fallbackHeight;
-        return width > 0 && height > 0;
+        var packed = width * height * 3 / 2;
+        if (bufferLength == packed)
+        {
+            stride = width;
+            return true;
+        }
+
+        var alignedStride = GetStride(width);
+        if (bufferLength == alignedStride * height * 3 / 2)
+        {
+            stride = alignedStride;
+            return true;
+        }
+
+        return false;
     }
 
     public static byte[] BgraToNv12(byte[] bgra, int width, int height)
@@ -85,9 +97,20 @@ internal static class Nv12Converter
         return nv12;
     }
 
-    public static byte[] Nv12ToBgra(byte[] nv12, int width, int height)
+    public static byte[] Nv12ToBgra(byte[] nv12, int width, int height, int stride = 0)
     {
-        var stride = GetStride(width);
+        if (stride <= 0)
+        {
+            stride = GetStride(width);
+        }
+
+        var required = stride * height * 3 / 2;
+        if (nv12.Length < required)
+        {
+            throw new ArgumentException(
+                $"NV12 buffer is {nv12.Length} bytes, expected at least {required} for {width}x{height} stride {stride}.");
+        }
+
         var bgra = new byte[width * height * 4];
         var yPlaneSize = stride * height;
 

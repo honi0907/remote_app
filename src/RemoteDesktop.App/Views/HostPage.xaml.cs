@@ -238,6 +238,7 @@ public sealed partial class HostPage : Page
                     ? $"クライアント接続済み - JPEG配信中（H.264はMedia Foundation未対応）"
                     : $"クライアント接続済み - 画面共有中 ({codecLabel})";
                 ConnectedClientText.Text = "接続中のクライアント: 1";
+                DiagnosticText.Text = $"診断: 配信開始 codec={_screenCapture.ActiveCodec} capture={_screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight}";
             }
             catch (Exception ex)
             {
@@ -264,6 +265,7 @@ public sealed partial class HostPage : Page
             StatusText.Text = "接続待機中…";
             ConnectedClientText.Text = "接続中のクライアント: なし";
             FpsText.Text = "FPS: --";
+            DiagnosticText.Text = "診断: 待機中";
             await _screenCapture.StopAsync();
         });
     }
@@ -284,7 +286,14 @@ public sealed partial class HostPage : Page
             var fps = _frameCount / elapsed.TotalSeconds;
             _frameCount = 0;
             _fpsWindowStart = DateTime.UtcNow;
-            _ = DispatcherQueue.EnqueueAsync(() => FpsText.Text = $"FPS: {fps:0}");
+            var encodeError = _screenCapture.LastEncodeError;
+            _ = DispatcherQueue.EnqueueAsync(() =>
+            {
+                FpsText.Text = $"FPS: {fps:0}";
+                DiagnosticText.Text = encodeError is null
+                    ? $"診断: 送信 {frame.Codec} {frame.Metadata.Width}x{frame.Metadata.Height} {frame.Payload.Length}B key={frame.IsKeyframe}"
+                    : $"診断: エンコードエラー {encodeError}";
+            });
         }
     }
 

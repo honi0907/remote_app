@@ -9,8 +9,9 @@ public sealed class SessionServer : IAsyncDisposable
     private readonly MessageReader _reader = new();
     private readonly object _clientSync = new();
     private readonly object _frameSendSync = new();
-    private EncodedStreamFrame? _latestFrame;
+    private readonly Queue<EncodedStreamFrame> _frameQueue = new();
     private Task? _frameSendTask;
+    private const int MaxQueuedH264Frames = 12;
     private TcpListener? _listener;
     private TcpClient? _client;
     private NetworkStream? _stream;
@@ -135,10 +136,24 @@ public sealed class SessionServer : IAsyncDisposable
 
         lock (_frameSendSync)
         {
-            _latestFrame = frame;
+            if (frame.Codec == StreamCodec.Jpeg)
+            {
+                _frameQueue.Clear();
+                _frameQueue.Enqueue(frame);
+            }
+            else if (frame.IsKeyframe)
+            {
+                _frameQueue.Clear();
+                _frameQueue.Enqueue(frame);
+            }
+            else if (_frameQueue.Count < MaxQueuedH264Frames)
+            {
+                _frameQueue.Enqueue(frame);
+            }
+
             if (_frameSendTask is null || _frameSendTask.IsCompleted)
             {
-                _frameSendTask = Task.Run(SendLatestFrameLoopAsync);
+                _frameSendTask = Task.Run(SendQueuedFrameLoopAsync);
             }
         }
     }
@@ -335,7 +350,7 @@ public sealed class SessionServer : IAsyncDisposable
         ClientDisconnected?.Invoke(this, EventArgs.Empty);
     }
 
-    private async Task SendLatestFrameLoopAsync()
+    private async Task SendQueuedFrameLoopAsync()
     {
         try
         {
@@ -344,14 +359,13 @@ public sealed class SessionServer : IAsyncDisposable
                 EncodedStreamFrame frame;
                 lock (_frameSendSync)
                 {
-                    if (_latestFrame is null)
+                    if (_frameQueue.Count == 0)
                     {
                         _frameSendTask = null;
                         return;
                     }
 
-                    frame = _latestFrame.Value;
-                    _latestFrame = null;
+                    frame = _frameQueue.Dequeue();
                 }
 
                 await SendFrameAsync(frame);
@@ -361,6 +375,7 @@ public sealed class SessionServer : IAsyncDisposable
         {
             lock (_frameSendSync)
             {
+                _frameQueue.Clear();
                 _frameSendTask = null;
             }
         }

@@ -6,6 +6,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -25,7 +26,15 @@
             <TextBlock Grid.Column="6" x:Name="FpsText" Text="FPS: --" VerticalAlignment="Center" Opacity="0.8" />
         </Grid>
 
-        <Grid Grid.Row="1">
+        <TextBlock
+            x:Name="DiagnosticText"
+            Grid.Row="1"
+            Padding="16,0,16,8"
+            TextWrapping="Wrap"
+            Opacity="0.85"
+            Text="診断: 未接続" />
+
+        <Grid Grid.Row="2">
             <StackPanel x:Name="ConnectionPanel" Padding="24" Spacing="16">
                 <TextBlock x:Name="StatusText" Text="近傍ホストを探索中…" />
                 <TextBlock Text="近傍のホスト" FontWeight="SemiBold" />

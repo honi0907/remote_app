@@ -25,6 +25,7 @@ internal sealed class H264Encoder : IDisposable
         MediaFoundationRuntime.EnsureStarted();
 
         _transform = MediaFoundationTransformFactory.CreateTransform(H264MediaFoundationGuids.H264Encoder);
+        CodecApi.ConfigureGop(_transform, 8);
         ConfigureTransform(_transform, width, height, fps, bitrateKbps * 1000);
         MediaFoundationTransformHelper.SendStreamMessages(_transform);
 
@@ -42,6 +43,11 @@ internal sealed class H264Encoder : IDisposable
         if (_transform is null)
         {
             throw new InvalidOperationException("H.264 encoder is not initialized.");
+        }
+
+        if (_frameIndex % 8 == 0)
+        {
+            CodecApi.RequestKeyframe(_transform);
         }
 
         var sampleTime = _frameIndex * _frameDuration100ns;
@@ -114,64 +120,92 @@ internal sealed class H264Decoder : IDisposable
     private IMFTransform? _transform;
     private bool _outputConfigured;
 
+    public string? LastError { get; private set; }
+
     public (byte[] Bgra, int Width, int Height) Decode(byte[] bitstream, int frameWidth, int frameHeight)
     {
-        EnsureTransform();
-
-        using var sample = MediaFoundationSampleFactory.CreateSampleFromBuffer(bitstream, 0, 0);
-
-        for (var attempt = 0; attempt < 3; attempt++)
+        try
         {
+            EnsureTransform();
+
+            using var sample = MediaFoundationSampleFactory.CreateSampleFromBuffer(bitstream, 0, 0);
             _transform!.ProcessInput(0, sample, 0);
-            _transform.ProcessMessage(TMessageType.MessageCommandDrain, UIntPtr.Zero);
 
-            for (var outputTry = 0; outputTry < 6; outputTry++)
+            var decoded = TryReadOutput(frameWidth, frameHeight);
+            if (decoded.Bgra.Length > 0)
             {
-                try
-                {
-                    var output = MediaFoundationTransformHelper.ProcessOutput(
-                        _transform!,
-                        ref _outputConfigured,
-                        out var outputWidth,
-                        out var outputHeight);
-                    if (output is null || output.Length == 0)
-                    {
-                        continue;
-                    }
+                return decoded;
+            }
 
-                    var width = outputWidth;
-                    var height = outputHeight;
-                    if (!Nv12Converter.TryResolveDimensions(
-                            output.Length,
-                            outputWidth,
-                            outputHeight,
-                            frameWidth,
-                            frameHeight,
-                            out width,
-                            out height))
-                    {
-                        continue;
-                    }
+            if (H264BitstreamHelper.IsDecodableKeyframe(bitstream))
+            {
+                _transform.ProcessMessage(TMessageType.MessageCommandDrain, UIntPtr.Zero);
+                decoded = TryReadOutput(frameWidth, frameHeight);
+                MediaFoundationTransformHelper.SendStreamMessages(_transform);
+            }
 
-                    var bgra = Nv12Converter.Nv12ToBgra(output, width, height);
-                    return (bgra, width, height);
-                }
-                catch (SharpGenException ex) when (MediaFoundationTransformHelper.IsNeedMoreInput(ex.HResult))
+            return decoded;
+        }
+        catch (Exception ex)
+        {
+            LastError = ex.Message;
+            return ([], 0, 0);
+        }
+    }
+
+    private (byte[] Bgra, int Width, int Height) TryReadOutput(int frameWidth, int frameHeight)
+    {
+        for (var outputTry = 0; outputTry < 8; outputTry++)
+        {
+            try
+            {
+                var output = MediaFoundationTransformHelper.ProcessOutput(
+                    _transform!,
+                    ref _outputConfigured,
+                    out var outputWidth,
+                    out var outputHeight);
+                if (output is null || output.Length == 0)
                 {
-                    break;
+                    continue;
                 }
+
+                if (!Nv12Converter.TryResolveLayout(
+                        output.Length,
+                        outputWidth,
+                        outputHeight,
+                        frameWidth,
+                        frameHeight,
+                        out var width,
+                        out var height,
+                        out var stride))
+                {
+                    LastError = $"NV12サイズ不一致 {output.Length}B type={outputWidth}x{outputHeight} meta={frameWidth}x{frameHeight}";
+                    continue;
+                }
+
+                var bgra = Nv12Converter.Nv12ToBgra(output, width, height, stride);
+                LastError = null;
+                return (bgra, width, height);
+            }
+            catch (SharpGenException ex) when (MediaFoundationTransformHelper.IsNeedMoreInput(ex.HResult))
+            {
+                LastError = "デコーダが追加入力待ち（キーフレーム未到達の可能性）";
+                break;
             }
         }
 
         return ([], 0, 0);
     }
 
-    public void Dispose()
+    public void Reset()
     {
         _transform?.Dispose();
         _transform = null;
         _outputConfigured = false;
+        LastError = null;
     }
+
+    public void Dispose() => Reset();
 
     private void EnsureTransform()
     {

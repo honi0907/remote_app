@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -30,9 +31,12 @@ public sealed partial class ViewerPage : Page
     private DateTime _fpsWindowStart = DateTime.UtcNow;
     private bool _isConnected;
     private bool _isPointerCaptured;
-    private (FrameMetadata Metadata, byte[] Payload, StreamCodec Codec, bool IsKeyframe)? _latestFrame;
+    private readonly ConcurrentQueue<EncodedStreamFrame> _h264Queue = new();
+    private (FrameMetadata Metadata, byte[] Payload, StreamCodec Codec, bool IsKeyframe)? _latestJpegFrame;
     private int _renderInProgress;
     private int _h264DecodeFailures;
+    private int _h264Received;
+    private int _h264Decoded;
     private StreamCodec _activeCodec = StreamCodec.Jpeg;
 
     public ViewerPage()
@@ -162,12 +166,40 @@ public sealed partial class ViewerPage : Page
         _activeCodec = config.Codec;
         _h264Decoder.Reset();
         _h264DecodeFailures = 0;
+        _h264Received = 0;
+        _h264Decoded = 0;
+        while (_h264Queue.TryDequeue(out _))
+        {
+        }
+
+        _ = DispatcherQueue.EnqueueAsync(() =>
+            DiagnosticText.Text = $"診断: StreamConfig codec={config.Codec} fps={config.TargetFps} width={config.MaxCaptureWidth}");
     }
 
     private void OnStreamFrameReceived(object? sender, EncodedStreamFrame frame)
     {
         _frameCount++;
-        _latestFrame = (frame.Metadata, frame.Payload, frame.Codec, frame.IsKeyframe);
+        if (frame.Codec == StreamCodec.H264)
+        {
+            _h264Received++;
+            if (frame.IsKeyframe)
+            {
+                while (_h264Queue.TryDequeue(out _))
+                {
+                }
+            }
+            else if (_h264Queue.Count > 24)
+            {
+                return;
+            }
+
+            _h264Queue.Enqueue(frame);
+        }
+        else
+        {
+            _latestJpegFrame = (frame.Metadata, frame.Payload, frame.Codec, frame.IsKeyframe);
+        }
+
         TryRenderLatestFrame();
     }
 
@@ -182,53 +214,67 @@ public sealed partial class ViewerPage : Page
         {
             try
             {
-                while (_latestFrame is { } pending)
+                DecodedVideoFrame? lastDecoded = null;
+                while (_h264Queue.TryDequeue(out var pending))
                 {
-                    _latestFrame = null;
                     _sourceWidth = pending.Metadata.Width;
                     _sourceHeight = pending.Metadata.Height;
-
-                    if (pending.Codec == StreamCodec.H264)
+                    try
                     {
-                        var encoded = new EncodedStreamFrame(
-                            StreamCodec.H264,
-                            pending.Metadata,
-                            pending.Payload,
-                            pending.IsKeyframe);
-                        var decoded = _h264Decoder.Decode(encoded);
+                        var decoded = _h264Decoder.Decode(pending);
                         if (decoded.IsEmpty)
                         {
                             _h264DecodeFailures++;
-                            if (_h264DecodeFailures <= 3)
-                            {
-                                StatusText.Text = "H.264 デコード待機中…";
-                            }
-
+                            DiagnosticText.Text =
+                                $"診断: H.264受信 {_h264Received} / デコード成功 {_h264Decoded} / 失敗 {_h264DecodeFailures} " +
+                                $"in={pending.Payload.Length}B {pending.Metadata.Width}x{pending.Metadata.Height} key={pending.IsKeyframe} " +
+                                $"原因={_h264Decoder.LastError ?? "出力なし（キーフレーム待ち）"}";
                             continue;
                         }
 
                         _h264DecodeFailures = 0;
+                        _h264Decoded++;
                         _sourceWidth = decoded.Width;
                         _sourceHeight = decoded.Height;
-                        StatusText.Text = "接続済み";
-                        await ShowH264FrameAsync(decoded.Bgra, decoded.Width, decoded.Height);
+                        lastDecoded = decoded;
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        using var stream = new InMemoryRandomAccessStream();
-                        await stream.WriteAsync(pending.Payload.AsBuffer());
-                        stream.Seek(0);
-
-                        var bitmap = new BitmapImage();
-                        await bitmap.SetSourceAsync(stream);
-                        RemoteImage.Source = bitmap;
+                        _h264DecodeFailures++;
+                        DiagnosticText.Text = $"診断: デコード例外 {ex.Message}";
                     }
                 }
+
+                if (lastDecoded is { } decodedFrame)
+                {
+                    DiagnosticText.Text =
+                        $"診断: H.264表示 {decodedFrame.Width}x{decodedFrame.Height} 成功 {_h264Decoded} / 受信 {_h264Received}";
+                    await ShowH264FrameAsync(decodedFrame.Bgra, decodedFrame.Width, decodedFrame.Height);
+                }
+
+                if (_latestJpegFrame is { } jpeg)
+                {
+                    _latestJpegFrame = null;
+                    _sourceWidth = jpeg.Metadata.Width;
+                    _sourceHeight = jpeg.Metadata.Height;
+                    using var stream = new InMemoryRandomAccessStream();
+                    await stream.WriteAsync(jpeg.Payload.AsBuffer());
+                    stream.Seek(0);
+
+                    var bitmap = new BitmapImage();
+                    await bitmap.SetSourceAsync(stream);
+                    RemoteImage.Source = bitmap;
+                    DiagnosticText.Text = $"診断: JPEG表示 {jpeg.Metadata.Width}x{jpeg.Metadata.Height} {jpeg.Payload.Length}B";
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticText.Text = $"診断: 描画エラー {ex.Message}";
             }
             finally
             {
                 Interlocked.Exchange(ref _renderInProgress, 0);
-                if (_latestFrame is not null)
+                if (!_h264Queue.IsEmpty || _latestJpegFrame is not null)
                 {
                     TryRenderLatestFrame();
                 }
@@ -267,6 +313,7 @@ public sealed partial class ViewerPage : Page
             StatusText.Text = "切断されました。";
             LatencyText.Text = "遅延: --";
             FpsText.Text = "FPS: --";
+            DiagnosticText.Text = "診断: 切断";
             await Task.CompletedTask;
         });
     }
