@@ -101,6 +101,11 @@ public sealed class SessionServer : IAsyncDisposable
         await WriteAsync(MessageSerializer.BuildStreamStatus(text));
     }
 
+    public async Task SendHostCommandAsync(HostCommandKind command)
+    {
+        await WriteAsync(MessageSerializer.BuildHostCommand(command));
+    }
+
     public async Task SendFrameAsync(EncodedStreamFrame frame)
     {
         if (frame.Payload.Length == 0)

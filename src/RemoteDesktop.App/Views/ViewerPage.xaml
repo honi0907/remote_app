@@ -75,6 +75,7 @@
                     Background="Black"
                     IsTabStop="True"
                     PointerEntered="RemoteCanvas_PointerEntered"
+                    PointerExited="RemoteCanvas_PointerExited"
                     PointerMoved="RemoteCanvas_PointerMoved"
                     PointerPressed="RemoteCanvas_PointerPressed"
                     PointerReleased="RemoteCanvas_PointerReleased"
@@ -89,10 +90,10 @@
                 <Border
                     x:Name="RemoteOverlayBar"
                     VerticalAlignment="Top"
-                    Background="#CC000000">
+                    Background="#CC000000"
+                    Visibility="Collapsed">
                     <CommandBar Background="Transparent" DefaultLabelPosition="Right">
                         <AppBarButton Icon="Cancel" Label="切断" Click="DisconnectButton_Click" />
-                        <AppBarButton Label="フル画面解除" Click="ExitFullscreenButton_Click" />
                         <AppBarButton Label="フル画面" Click="EnterFullscreenButton_Click" />
                     </CommandBar>
                 </Border>

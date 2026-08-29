@@ -82,6 +82,12 @@
 
             <TextBlock x:Name="StatusText" />
             <TextBlock x:Name="ConnectedClientText" Opacity="0.8" />
+            <Button
+                x:Name="ExitViewerFullscreenButton"
+                Content="接続側フル画面を解除"
+                Click="ExitViewerFullscreenButton_Click"
+                HorizontalAlignment="Left"
+                Visibility="Collapsed" />
             <TextBlock x:Name="FpsText" Opacity="0.8" Text="FPS: --" />
             <TextBlock
                 x:Name="DiagnosticText"

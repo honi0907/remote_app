@@ -25,6 +25,7 @@ public enum MessageType : byte
     VideoFrame = 14,
     StreamStatus = 15,
     ViewerStatus = 16,
+    HostCommand = 17,
 }
 
 public enum MouseButtonKind : byte
@@ -51,6 +52,11 @@ public enum ConnectionResponseKind : byte
 {
     Accepted = 0,
     Rejected = 1,
+}
+
+public enum HostCommandKind : byte
+{
+    ExitViewerFullscreen = 0,
 }
 
 public readonly record struct FrameMetadata(int Width, int Height, long TimestampUtcTicks);

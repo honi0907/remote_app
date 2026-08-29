@@ -301,6 +301,7 @@ public sealed partial class HostPage : Page
                     ? $"クライアント接続済み - JPEG配信中（H.264はMedia Foundation未対応）"
                     : $"クライアント接続済み - 画面共有中 ({codecLabel})";
                 ConnectedClientText.Text = "接続中のクライアント: 1";
+                ExitViewerFullscreenButton.Visibility = Visibility.Visible;
                 DiagnosticText.Text = $"診断: 配信開始 codec={_screenCapture.ActiveCodec} capture={_screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight}";
                 SessionLog.Write("host", DiagnosticText.Text);
                 _diagnosticsTimer.Start();
@@ -309,6 +310,7 @@ public sealed partial class HostPage : Page
             {
                 StatusText.Text = "画面共有の開始に失敗しました";
                 ConnectedClientText.Text = "接続中のクライアント: なし";
+                ExitViewerFullscreenButton.Visibility = Visibility.Collapsed;
                 FpsText.Text = "FPS: --";
 
                 var dialog = new ContentDialog
@@ -329,6 +331,7 @@ public sealed partial class HostPage : Page
         {
             StatusText.Text = "接続待機中…";
             ConnectedClientText.Text = "接続中のクライアント: なし";
+            ExitViewerFullscreenButton.Visibility = Visibility.Collapsed;
             FpsText.Text = "FPS: --";
             DiagnosticText.Text = "診断: 待機中";
             ViewerDiagnosticText.Text = "接続側: 未受信";
@@ -411,6 +414,17 @@ public sealed partial class HostPage : Page
     private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
     {
         SessionLog.OpenDirectory();
+    }
+
+    private async void ExitViewerFullscreenButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_sessionServer.HasAuthenticatedClient)
+        {
+            return;
+        }
+
+        await _sessionServer.SendHostCommandAsync(HostCommandKind.ExitViewerFullscreen);
+        SessionLog.Write("host", "接続側フル画面解除コマンドを送信しました");
     }
 
     private void BackButton_Click(object sender, RoutedEventArgs e)

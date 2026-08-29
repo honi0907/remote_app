@@ -71,9 +71,11 @@ public sealed partial class ViewerPage : Page
         _sessionClient.StreamStatusReceived += OnStreamStatusReceived;
         _sessionClient.LatencyMeasured += OnLatencyMeasured;
         _sessionClient.Disconnected += OnDisconnected;
+        _sessionClient.HostCommandReceived += OnHostCommandReceived;
 
         RemoteCanvas.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(RemoteCanvas_KeyDown), true);
         RemoteCanvas.AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(RemoteCanvas_KeyUp), true);
+        AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(Page_KeyDown), true);
     }
 
     protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -89,6 +91,8 @@ public sealed partial class ViewerPage : Page
 
     protected override async void OnNavigatedFrom(NavigationEventArgs e)
     {
+        RemoteCursorHelper.ForceVisible();
+        UnhookMainWindowActivation();
         _pingTimer.Stop();
         _fpsTimer.Stop();
         _cts?.Cancel();
@@ -186,6 +190,7 @@ public sealed partial class ViewerPage : Page
             _pingTimer.Start();
             _fpsTimer.Start();
             SessionLog.Write("viewer", $"接続済み {address}:{port}");
+            HookMainWindowActivation();
             EnterFullscreen();
             RemoteCanvas.Focus(FocusState.Programmatic);
         }
@@ -498,6 +503,8 @@ public sealed partial class ViewerPage : Page
             _isConnected = false;
             _pingTimer.Stop();
             _fpsTimer.Stop();
+            RemoteCursorHelper.ForceVisible();
+            UnhookMainWindowActivation();
             ExitFullscreen();
             ConnectionPanel.Visibility = Visibility.Visible;
             RemotePanel.Visibility = Visibility.Collapsed;
@@ -548,12 +555,28 @@ public sealed partial class ViewerPage : Page
         }
     }
 
+    private void OnHostCommandReceived(object? sender, HostCommandKind command)
+    {
+        if (command != HostCommandKind.ExitViewerFullscreen)
+        {
+            return;
+        }
+
+        _ = DispatcherQueue.EnqueueAsync(() => ExitFullscreen(showControls: true));
+    }
+
     private void RemoteCanvas_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
         if (_isConnected)
         {
+            RemoteCursorHelper.SetHidden(true);
             RemoteCanvas.Focus(FocusState.Pointer);
         }
+    }
+
+    private void RemoteCanvas_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        RemoteCursorHelper.SetHidden(false);
     }
 
     private void RemoteCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
@@ -627,6 +650,29 @@ public sealed partial class ViewerPage : Page
         await _sessionClient.SendMouseWheelAsync(delta, nx, ny);
     }
 
+    private void Page_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!_isConnected)
+        {
+            return;
+        }
+
+        if (e.Key == VirtualKey.Escape && _isFullscreen)
+        {
+            ExitFullscreen(showControls: true);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == VirtualKey.D &&
+            IsCtrlShiftPressed() &&
+            _isConnected)
+        {
+            _ = _sessionClient.DisconnectAsync();
+            e.Handled = true;
+        }
+    }
+
     private async void RemoteCanvas_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (!_isConnected)
@@ -636,7 +682,14 @@ public sealed partial class ViewerPage : Page
 
         if (e.Key == VirtualKey.Escape && _isFullscreen)
         {
-            ExitFullscreen();
+            ExitFullscreen(showControls: true);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == VirtualKey.D && IsCtrlShiftPressed())
+        {
+            await _sessionClient.DisconnectAsync();
             e.Handled = true;
             return;
         }
@@ -763,12 +816,13 @@ public sealed partial class ViewerPage : Page
         appWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
         HeaderBar.Visibility = Visibility.Collapsed;
         DiagnosticBar.Visibility = Visibility.Collapsed;
+        RemoteOverlayBar.Visibility = Visibility.Collapsed;
         HeaderRow.Height = new GridLength(0);
         DiagnosticRow.Height = new GridLength(0);
         _isFullscreen = true;
     }
 
-    private void ExitFullscreen()
+    private void ExitFullscreen(bool showControls = true)
     {
         if (!_isFullscreen)
         {
@@ -781,10 +835,15 @@ public sealed partial class ViewerPage : Page
             appWindow.SetPresenter(AppWindowPresenterKind.Default);
         }
 
-        HeaderBar.Visibility = Visibility.Visible;
-        DiagnosticBar.Visibility = Visibility.Visible;
-        HeaderRow.Height = GridLength.Auto;
-        DiagnosticRow.Height = GridLength.Auto;
+        if (showControls && _isConnected)
+        {
+            HeaderBar.Visibility = Visibility.Visible;
+            DiagnosticBar.Visibility = Visibility.Visible;
+            RemoteOverlayBar.Visibility = Visibility.Visible;
+            HeaderRow.Height = GridLength.Auto;
+            DiagnosticRow.Height = GridLength.Auto;
+        }
+
         _isFullscreen = false;
     }
 
@@ -794,9 +853,40 @@ public sealed partial class ViewerPage : Page
         RemoteCanvas.Focus(FocusState.Programmatic);
     }
 
-    private void ExitFullscreenButton_Click(object sender, RoutedEventArgs e)
+    private void HookMainWindowActivation()
     {
-        ExitFullscreen();
+        if (App.MainWindowInstance is null)
+        {
+            return;
+        }
+
+        App.MainWindowInstance.Activated += MainWindow_Activated;
+    }
+
+    private void UnhookMainWindowActivation()
+    {
+        if (App.MainWindowInstance is null)
+        {
+            return;
+        }
+
+        App.MainWindowInstance.Activated -= MainWindow_Activated;
+    }
+
+    private void MainWindow_Activated(object sender, WindowActivatedEventArgs e)
+    {
+        if (e.WindowActivationState == WindowActivationState.Deactivated)
+        {
+            RemoteCursorHelper.SetHidden(false);
+        }
+    }
+
+    private static bool IsCtrlShiftPressed()
+    {
+        var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control);
+        var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
+        return ctrl.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)
+            && shift.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
     }
 
     private async void DisconnectButton_Click(object sender, RoutedEventArgs e)

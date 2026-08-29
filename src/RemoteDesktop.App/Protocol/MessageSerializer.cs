@@ -52,6 +52,9 @@ public static class MessageSerializer
         return Wrap(MessageType.ViewerStatus, bytes);
     }
 
+    public static byte[] BuildHostCommand(HostCommandKind command) =>
+        Wrap(MessageType.HostCommand, [(byte)command]);
+
     public static byte[] BuildVideoFrame(FrameMetadata metadata, byte[] h264Bytes, bool isKeyframe)
     {
         var payload = new byte[21 + h264Bytes.Length];
@@ -173,6 +176,12 @@ public static class MessageSerializer
 
     public static string ParseViewerStatus(ReadOnlySpan<byte> payload) =>
         System.Text.Encoding.UTF8.GetString(Payload(payload));
+
+    public static HostCommandKind ParseHostCommand(ReadOnlySpan<byte> payload)
+    {
+        var body = Payload(payload);
+        return body.Length > 0 ? (HostCommandKind)body[0] : HostCommandKind.ExitViewerFullscreen;
+    }
 
     public static (FrameMetadata Metadata, byte[] H264, bool IsKeyframe) ParseVideoFrame(ReadOnlySpan<byte> payload)
     {

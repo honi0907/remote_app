@@ -26,6 +26,7 @@ public sealed class SessionClient : IAsyncDisposable
     public event EventHandler? Disconnected;
     public event EventHandler<ConnectionResponseKind>? ConnectionResponseReceived;
     public event EventHandler<AuthResult>? AuthResponseReceived;
+    public event EventHandler<HostCommandKind>? HostCommandReceived;
 
     public bool IsConnected => _client?.Connected == true;
 
@@ -235,6 +236,10 @@ public sealed class SessionClient : IAsyncDisposable
                 var sentAt = MessageSerializer.ParseTimestamp(message);
                 var latencyMs = (DateTime.UtcNow.Ticks - sentAt) / TimeSpan.TicksPerMillisecond;
                 LatencyMeasured?.Invoke(this, latencyMs);
+                break;
+
+            case MessageType.HostCommand:
+                HostCommandReceived?.Invoke(this, MessageSerializer.ParseHostCommand(message));
                 break;
 
             case MessageType.Disconnect:

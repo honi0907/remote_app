@@ -13,6 +13,7 @@ public static class ProtocolTests
         TestFrameRoundTrip();
         TestStreamConfigRoundTrip();
         TestVideoFrameRoundTrip();
+        TestHostCommandRoundTrip();
         TestMessageReader();
         TestCoordinateMapper();
         Console.WriteLine("All protocol tests passed.");
@@ -92,6 +93,16 @@ public static class ProtocolTests
             !parsedH264.SequenceEqual(h264))
         {
             throw new InvalidOperationException("Video frame round-trip failed.");
+        }
+    }
+
+    private static void TestHostCommandRoundTrip()
+    {
+        var bytes = MessageSerializer.BuildHostCommand(HostCommandKind.ExitViewerFullscreen);
+        var parsed = MessageSerializer.ParseHostCommand(bytes);
+        if (parsed != HostCommandKind.ExitViewerFullscreen)
+        {
+            throw new InvalidOperationException("Host command round-trip failed.");
         }
     }
 
