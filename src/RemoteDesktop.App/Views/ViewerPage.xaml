@@ -31,7 +31,8 @@
             Grid.Row="1"
             Padding="16,0,16,8"
             TextWrapping="Wrap"
-            Opacity="0.85"
+            FontWeight="SemiBold"
+            Foreground="#E6B800"
             Text="診断: 未接続" />
 
         <Grid Grid.Row="2">
@@ -91,6 +92,16 @@
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch"
                         IsHitTestVisible="False" />
+                    <TextBlock
+                        x:Name="OverlayDiagnosticText"
+                        Margin="12"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
+                        FontWeight="SemiBold"
+                        Foreground="#FFE6B800"
+                        TextWrapping="Wrap"
+                        IsHitTestVisible="False"
+                        Text="診断: 接続直後" />
                 </Grid>
             </Grid>
         </Grid>

@@ -37,6 +37,10 @@ public sealed partial class ViewerPage : Page
     private int _h264DecodeFailures;
     private int _h264Received;
     private int _h264Decoded;
+    private int _h264Keyframes;
+    private int _lastPayloadBytes;
+    private int _lastPixelNonZero;
+    private string _lastDetail = "未受信";
     private StreamCodec _activeCodec = StreamCodec.Jpeg;
 
     public ViewerPage()
@@ -168,12 +172,16 @@ public sealed partial class ViewerPage : Page
         _h264DecodeFailures = 0;
         _h264Received = 0;
         _h264Decoded = 0;
+        _h264Keyframes = 0;
+        _lastPayloadBytes = 0;
+        _lastPixelNonZero = 0;
+        _lastDetail = $"StreamConfig codec={config.Codec}";
         while (_h264Queue.TryDequeue(out _))
         {
         }
 
-        _ = DispatcherQueue.EnqueueAsync(() =>
-            DiagnosticText.Text = $"診断: StreamConfig codec={config.Codec} fps={config.TargetFps} width={config.MaxCaptureWidth}");
+        _ = DispatcherQueue.EnqueueAsync(() => SetDiagnostic(
+            $"StreamConfig codec={config.Codec} fps={config.TargetFps} width={config.MaxCaptureWidth}"));
     }
 
     private void OnStreamFrameReceived(object? sender, EncodedStreamFrame frame)
@@ -182,8 +190,10 @@ public sealed partial class ViewerPage : Page
         if (frame.Codec == StreamCodec.H264)
         {
             _h264Received++;
+            _lastPayloadBytes = frame.Payload.Length;
             if (frame.IsKeyframe)
             {
+                _h264Keyframes++;
                 while (_h264Queue.TryDequeue(out _))
                 {
                 }
@@ -225,10 +235,8 @@ public sealed partial class ViewerPage : Page
                         if (decoded.IsEmpty)
                         {
                             _h264DecodeFailures++;
-                            DiagnosticText.Text =
-                                $"診断: H.264受信 {_h264Received} / デコード成功 {_h264Decoded} / 失敗 {_h264DecodeFailures} " +
-                                $"in={pending.Payload.Length}B {pending.Metadata.Width}x{pending.Metadata.Height} key={pending.IsKeyframe} " +
-                                $"原因={_h264Decoder.LastError ?? "出力なし（キーフレーム待ち）"}";
+                            SetDiagnostic(
+                                $"デコード失敗 in={pending.Payload.Length}B {pending.Metadata.Width}x{pending.Metadata.Height} key={pending.IsKeyframe} 原因={_h264Decoder.LastError ?? "出力なし（キーフレーム待ち）"}");
                             continue;
                         }
 
@@ -241,14 +249,15 @@ public sealed partial class ViewerPage : Page
                     catch (Exception ex)
                     {
                         _h264DecodeFailures++;
-                        DiagnosticText.Text = $"診断: デコード例外 {ex.Message}";
+                        SetDiagnostic($"デコード例外 {ex.Message}");
                     }
                 }
 
                 if (lastDecoded is { } decodedFrame)
                 {
-                    DiagnosticText.Text =
-                        $"診断: H.264表示 {decodedFrame.Width}x{decodedFrame.Height} 成功 {_h264Decoded} / 受信 {_h264Received}";
+                    _lastPixelNonZero = CountNonZeroRgb(decodedFrame.Bgra);
+                    SetDiagnostic(
+                        $"描画 {decodedFrame.Width}x{decodedFrame.Height} 非ゼロ画素={_lastPixelNonZero}");
                     await ShowH264FrameAsync(decodedFrame.Bgra, decodedFrame.Width, decodedFrame.Height);
                 }
 
@@ -264,12 +273,12 @@ public sealed partial class ViewerPage : Page
                     var bitmap = new BitmapImage();
                     await bitmap.SetSourceAsync(stream);
                     RemoteImage.Source = bitmap;
-                    DiagnosticText.Text = $"診断: JPEG表示 {jpeg.Metadata.Width}x{jpeg.Metadata.Height} {jpeg.Payload.Length}B";
+                    SetDiagnostic($"JPEG表示 {jpeg.Metadata.Width}x{jpeg.Metadata.Height} {jpeg.Payload.Length}B");
                 }
             }
             catch (Exception ex)
             {
-                DiagnosticText.Text = $"診断: 描画エラー {ex.Message}";
+                SetDiagnostic($"描画エラー {ex.Message}");
             }
             finally
             {
@@ -284,15 +293,46 @@ public sealed partial class ViewerPage : Page
 
     private async Task ShowH264FrameAsync(byte[] bgra, int width, int height)
     {
-        using var softwareBitmap = SoftwareBitmap.CreateCopyFromBuffer(
-            bgra.AsBuffer(),
+        using var stream = new InMemoryRandomAccessStream();
+        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.BmpEncoderId, stream);
+        encoder.SetPixelData(
             BitmapPixelFormat.Bgra8,
-            width,
-            height,
-            BitmapAlphaMode.Ignore);
-        var source = new SoftwareBitmapSource();
-        await source.SetBitmapAsync(softwareBitmap);
-        RemoteImage.Source = source;
+            BitmapAlphaMode.Ignore,
+            (uint)width,
+            (uint)height,
+            96,
+            96,
+            bgra);
+        await encoder.FlushAsync();
+        stream.Seek(0);
+
+        var bitmap = new BitmapImage();
+        await bitmap.SetSourceAsync(stream);
+        RemoteImage.Source = bitmap;
+    }
+
+    private void SetDiagnostic(string detail)
+    {
+        _lastDetail = detail;
+        var text =
+            $"診断: codec={_activeCodec} 受信={_h264Received} key={_h264Keyframes} " +
+            $"デコード={_h264Decoded} 失敗={_h264DecodeFailures} 最終={_lastPayloadBytes}B 非ゼロ={_lastPixelNonZero} / {detail}";
+        DiagnosticText.Text = text;
+        OverlayDiagnosticText.Text = text;
+    }
+
+    private static int CountNonZeroRgb(byte[] bgra)
+    {
+        var count = 0;
+        for (var i = 0; i + 3 < bgra.Length; i += 16)
+        {
+            if (bgra[i] != 0 || bgra[i + 1] != 0 || bgra[i + 2] != 0)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private void OnLatencyMeasured(object? sender, long latencyMs)
@@ -313,7 +353,7 @@ public sealed partial class ViewerPage : Page
             StatusText.Text = "切断されました。";
             LatencyText.Text = "遅延: --";
             FpsText.Text = "FPS: --";
-            DiagnosticText.Text = "診断: 切断";
+            SetDiagnostic("切断");
             await Task.CompletedTask;
         });
     }
@@ -328,6 +368,7 @@ public sealed partial class ViewerPage : Page
 
         var fps = _frameCount / elapsed.TotalSeconds;
         FpsText.Text = $"FPS: {fps:0}";
+        SetDiagnostic(_lastDetail);
         _frameCount = 0;
         _fpsWindowStart = DateTime.UtcNow;
     }
