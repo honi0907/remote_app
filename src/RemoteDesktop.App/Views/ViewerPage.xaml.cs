@@ -32,6 +32,11 @@ public sealed partial class ViewerPage : Page
     private bool _isConnected;
     private bool _isPointerCaptured;
     private readonly ConcurrentQueue<EncodedStreamFrame> _h264Queue = new();
+    private readonly SemaphoreSlim _decodeSignal = new(0);
+    private readonly object _decodeSync = new();
+    private WriteableBitmap? _h264Bitmap;
+    private (byte[] Bgra, int Width, int Height)? _pendingPresent;
+    private int _presentQueued;
     private (FrameMetadata Metadata, byte[] Payload, StreamCodec Codec, bool IsKeyframe)? _latestJpegFrame;
     private int _renderInProgress;
     private int _h264DecodeFailures;
@@ -66,6 +71,7 @@ public sealed partial class ViewerPage : Page
     {
         base.OnNavigatedTo(e);
         _cts = new CancellationTokenSource();
+        _ = Task.Run(() => DecodeLoopAsync(_cts.Token));
         await _discovery.StartListeningAsync(_cts.Token);
         RefreshHostList();
     }
@@ -75,8 +81,19 @@ public sealed partial class ViewerPage : Page
         _pingTimer.Stop();
         _fpsTimer.Stop();
         _cts?.Cancel();
+        try
+        {
+            _decodeSignal.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+        }
+
         await _sessionClient.DisposeAsync();
-        _h264Decoder.Dispose();
+        lock (_decodeSync)
+        {
+            _h264Decoder.Dispose();
+        }
         await _discovery.DisposeAsync();
         _cts?.Dispose();
         _cts = null;
@@ -174,7 +191,6 @@ public sealed partial class ViewerPage : Page
     private void OnStreamConfigReceived(object? sender, StreamConfigMessage config)
     {
         _activeCodec = config.Codec;
-        _h264Decoder.Reset();
         _h264DecodeFailures = 0;
         _h264Received = 0;
         _h264Decoded = 0;
@@ -182,6 +198,10 @@ public sealed partial class ViewerPage : Page
         _lastPayloadBytes = 0;
         _lastPixelNonZero = 0;
         _lastDetail = $"StreamConfig codec={config.Codec}";
+        lock (_decodeSync)
+        {
+            _h264Decoder.Reset();
+        }
         while (_h264Queue.TryDequeue(out _))
         {
         }
@@ -210,13 +230,114 @@ public sealed partial class ViewerPage : Page
             }
 
             _h264Queue.Enqueue(frame);
+            try
+            {
+                _decodeSignal.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+            }
         }
         else
         {
             _latestJpegFrame = (frame.Metadata, frame.Payload, frame.Codec, frame.IsKeyframe);
+            TryRenderLatestFrame();
+        }
+    }
+
+    private async Task DecodeLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await _decodeSignal.WaitAsync(cancellationToken);
+                DecodedVideoFrame? lastDecoded = null;
+                while (_h264Queue.TryDequeue(out var pending))
+                {
+                    _sourceWidth = pending.Metadata.Width;
+                    _sourceHeight = pending.Metadata.Height;
+                    try
+                    {
+                        DecodedVideoFrame decoded;
+                        lock (_decodeSync)
+                        {
+                            decoded = _h264Decoder.Decode(pending);
+                        }
+
+                        if (decoded.IsEmpty)
+                        {
+                            _h264DecodeFailures++;
+                            _lastDetail = $"デコード失敗 key={pending.IsKeyframe} {_h264Decoder.LastError ?? "出力なし"}";
+                            continue;
+                        }
+
+                        _h264DecodeFailures = 0;
+                        _h264Decoded++;
+                        _sourceWidth = decoded.Width;
+                        _sourceHeight = decoded.Height;
+                        lastDecoded = decoded;
+                    }
+                    catch (Exception ex)
+                    {
+                        _h264DecodeFailures++;
+                        _lastDetail = $"デコード例外 {ex.Message}";
+                    }
+                }
+
+                if (lastDecoded is { } decodedFrame)
+                {
+                    _lastPixelNonZero = CountNonZeroRgb(decodedFrame.Bgra);
+                    _lastDetail = $"描画 {decodedFrame.Width}x{decodedFrame.Height}";
+                    RequestPresent(decodedFrame.Bgra, decodedFrame.Width, decodedFrame.Height);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void RequestPresent(byte[] bgra, int width, int height)
+    {
+        _pendingPresent = (bgra, width, height);
+        if (Interlocked.CompareExchange(ref _presentQueued, 1, 0) != 0)
+        {
+            return;
         }
 
-        TryRenderLatestFrame();
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                var pending = _pendingPresent;
+                _pendingPresent = null;
+                if (pending is { } frame)
+                {
+                    ShowH264Pixels(frame.Bgra, frame.Width, frame.Height);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _presentQueued, 0);
+                if (_pendingPresent is { } leftover)
+                {
+                    RequestPresent(leftover.Bgra, leftover.Width, leftover.Height);
+                }
+            }
+        });
+    }
+
+    private void ShowH264Pixels(byte[] bgra, int width, int height)
+    {
+        if (_h264Bitmap is null || _h264Bitmap.PixelWidth != width || _h264Bitmap.PixelHeight != height)
+        {
+            _h264Bitmap = new WriteableBitmap(width, height);
+            RemoteImage.Source = _h264Bitmap;
+        }
+
+        bgra.CopyTo(_h264Bitmap.PixelBuffer);
+        _h264Bitmap.Invalidate();
     }
 
     private void TryRenderLatestFrame()
@@ -230,43 +351,6 @@ public sealed partial class ViewerPage : Page
         {
             try
             {
-                DecodedVideoFrame? lastDecoded = null;
-                while (_h264Queue.TryDequeue(out var pending))
-                {
-                    _sourceWidth = pending.Metadata.Width;
-                    _sourceHeight = pending.Metadata.Height;
-                    try
-                    {
-                        var decoded = _h264Decoder.Decode(pending);
-                        if (decoded.IsEmpty)
-                        {
-                            _h264DecodeFailures++;
-                            SetDiagnostic(
-                                $"デコード失敗 in={pending.Payload.Length}B {pending.Metadata.Width}x{pending.Metadata.Height} key={pending.IsKeyframe} 原因={_h264Decoder.LastError ?? "出力なし（キーフレーム待ち）"}");
-                            continue;
-                        }
-
-                        _h264DecodeFailures = 0;
-                        _h264Decoded++;
-                        _sourceWidth = decoded.Width;
-                        _sourceHeight = decoded.Height;
-                        lastDecoded = decoded;
-                    }
-                    catch (Exception ex)
-                    {
-                        _h264DecodeFailures++;
-                        SetDiagnostic($"デコード例外 {ex.Message}");
-                    }
-                }
-
-                if (lastDecoded is { } decodedFrame)
-                {
-                    _lastPixelNonZero = CountNonZeroRgb(decodedFrame.Bgra);
-                    SetDiagnostic(
-                        $"描画 {decodedFrame.Width}x{decodedFrame.Height} 非ゼロ画素={_lastPixelNonZero}");
-                    await ShowH264FrameAsync(decodedFrame.Bgra, decodedFrame.Width, decodedFrame.Height);
-                }
-
                 if (_latestJpegFrame is { } jpeg)
                 {
                     _latestJpegFrame = null;
@@ -279,42 +363,22 @@ public sealed partial class ViewerPage : Page
                     var bitmap = new BitmapImage();
                     await bitmap.SetSourceAsync(stream);
                     RemoteImage.Source = bitmap;
-                    SetDiagnostic($"JPEG表示 {jpeg.Metadata.Width}x{jpeg.Metadata.Height} {jpeg.Payload.Length}B");
+                    _lastDetail = $"JPEG表示 {jpeg.Metadata.Width}x{jpeg.Metadata.Height} {jpeg.Payload.Length}B";
                 }
             }
             catch (Exception ex)
             {
-                SetDiagnostic($"描画エラー {ex.Message}");
+                _lastDetail = $"描画エラー {ex.Message}";
             }
             finally
             {
                 Interlocked.Exchange(ref _renderInProgress, 0);
-                if (!_h264Queue.IsEmpty || _latestJpegFrame is not null)
+                if (_latestJpegFrame is not null)
                 {
                     TryRenderLatestFrame();
                 }
             }
         });
-    }
-
-    private async Task ShowH264FrameAsync(byte[] bgra, int width, int height)
-    {
-        using var stream = new InMemoryRandomAccessStream();
-        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.BmpEncoderId, stream);
-        encoder.SetPixelData(
-            BitmapPixelFormat.Bgra8,
-            BitmapAlphaMode.Ignore,
-            (uint)width,
-            (uint)height,
-            96,
-            96,
-            bgra);
-        await encoder.FlushAsync();
-        stream.Seek(0);
-
-        var bitmap = new BitmapImage();
-        await bitmap.SetSourceAsync(stream);
-        RemoteImage.Source = bitmap;
     }
 
     private void SetDiagnostic(string detail)

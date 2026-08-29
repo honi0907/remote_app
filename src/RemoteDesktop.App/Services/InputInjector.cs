@@ -7,7 +7,8 @@ public static class InputInjector
 {
     private const int InputMouse = 0;
     private const int InputKeyboard = 1;
-    private const uint MouseMoveAbsolute = 0x8000;
+    private const uint MouseMove = 0x0001;
+    private const uint MouseMoveAbsolute = 0x8001;
     private const uint MouseLeftDown = 0x0002;
     private const uint MouseLeftUp = 0x0004;
     private const uint MouseRightDown = 0x0008;

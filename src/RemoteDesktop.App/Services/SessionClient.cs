@@ -245,7 +245,7 @@ public sealed class SessionClient : IAsyncDisposable
     {
         while (true)
         {
-            await Task.Delay(16);
+            // 最初の移動は待たず、以降だけ間引く。
 
             double normalizedX;
             double normalizedY;
@@ -265,6 +265,7 @@ public sealed class SessionClient : IAsyncDisposable
             try
             {
                 await SendMouseMoveAsync(normalizedX, normalizedY);
+                await Task.Delay(8);
             }
             catch (Exception)
             {
