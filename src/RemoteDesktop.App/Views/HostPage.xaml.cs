@@ -326,7 +326,7 @@ public sealed partial class HostPage : Page
 
         if (_screenCapture.ActiveCodec == StreamCodec.H264 &&
             _screenCapture.EncodeSuccesses == 0 &&
-            _screenCapture.EncodeAttempts >= 40)
+            _screenCapture.EncodeAttempts >= 8)
         {
             _screenCapture.FallbackToJpeg("H.264がフレームを出せないためJPEGへ切替");
             try

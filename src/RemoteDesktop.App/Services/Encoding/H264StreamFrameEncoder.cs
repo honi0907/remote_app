@@ -44,7 +44,7 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
             using var bitmap = SurfaceBitmapHelper.CopySurfaceToBitmap(surface);
             var bgra = ScaleBgra(SurfaceBitmapHelper.ExtractBgra(bitmap), bitmap.PixelWidth, bitmap.PixelHeight, width, height);
             var nv12 = Nv12Converter.BgraToNv12(bgra, width, height);
-            var (payload, isKeyframe) = _encoder.EncodeNv12(nv12);
+            var (payload, isKeyframe) = EncodeUntilOutput(nv12);
             if (payload.Length == 0)
             {
                 return Empty();
@@ -79,6 +79,26 @@ public sealed class H264StreamFrameEncoder : IStreamFrameEncoder
         _configuredWidth = width;
         _configuredHeight = height;
         _hasSentFrame = false;
+    }
+
+    private (byte[] Payload, bool IsKeyframe) EncodeUntilOutput(byte[] nv12)
+    {
+        var rounds = _hasSentFrame ? 1 : 24;
+        for (var i = 0; i < rounds; i++)
+        {
+            var (payload, isKeyframe) = _encoder.EncodeNv12(nv12);
+            if (payload.Length == 0)
+            {
+                continue;
+            }
+
+            if (_hasSentFrame || isKeyframe)
+            {
+                return (payload, isKeyframe);
+            }
+        }
+
+        return ([], false);
     }
 
     private static int EstimateBitrateKbps(int width, int height, int fps)
