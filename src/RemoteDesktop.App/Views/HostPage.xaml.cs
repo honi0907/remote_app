@@ -45,6 +45,12 @@ public sealed partial class HostPage : Page
         _screenCapture.FrameCaptured += OnFrameCaptured;
     }
 
+    private void UpdateConnectedUi()
+    {
+        var connected = _sessionServer.HasAuthenticatedClient;
+        ConnectedActionsBar.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
@@ -288,9 +294,11 @@ public sealed partial class HostPage : Page
     {
         await DispatcherQueue.EnqueueAsync(async () =>
         {
+            UpdateConnectedUi();
             try
             {
                 var settings = HostSettingsStore.Load();
+                _screenCapture.SetCursorCaptureEnabled(false);
                 _screenCapture.ConfigureEncoder(settings.DeliveryMode);
                 await _sessionServer.SendStreamConfigAsync(_screenCapture.CreateStreamConfig());
                 await _screenCapture.StartAsync(_cts?.Token ?? CancellationToken.None);
@@ -301,7 +309,7 @@ public sealed partial class HostPage : Page
                     ? $"クライアント接続済み - JPEG配信中（H.264はMedia Foundation未対応）"
                     : $"クライアント接続済み - 画面共有中 ({codecLabel})";
                 ConnectedClientText.Text = "接続中のクライアント: 1";
-                ExitViewerFullscreenButton.Visibility = Visibility.Visible;
+                UpdateConnectedUi();
                 DiagnosticText.Text = $"診断: 配信開始 codec={_screenCapture.ActiveCodec} capture={_screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight}";
                 SessionLog.Write("host", DiagnosticText.Text);
                 _diagnosticsTimer.Start();
@@ -309,8 +317,10 @@ public sealed partial class HostPage : Page
             catch (Exception ex)
             {
                 StatusText.Text = "画面共有の開始に失敗しました";
-                ConnectedClientText.Text = "接続中のクライアント: なし";
-                ExitViewerFullscreenButton.Visibility = Visibility.Collapsed;
+                ConnectedClientText.Text = _sessionServer.HasAuthenticatedClient
+                    ? "接続中のクライアント: 1"
+                    : "接続中のクライアント: なし";
+                UpdateConnectedUi();
                 FpsText.Text = "FPS: --";
 
                 var dialog = new ContentDialog
@@ -331,13 +341,14 @@ public sealed partial class HostPage : Page
         {
             StatusText.Text = "接続待機中…";
             ConnectedClientText.Text = "接続中のクライアント: なし";
-            ExitViewerFullscreenButton.Visibility = Visibility.Collapsed;
+            UpdateConnectedUi();
             FpsText.Text = "FPS: --";
             DiagnosticText.Text = "診断: 待機中";
             ViewerDiagnosticText.Text = "接続側: 未受信";
             SessionLog.Write("host", "クライアント切断");
             _applySettingsTimer.Stop();
             _diagnosticsTimer.Stop();
+            _screenCapture.SetCursorCaptureEnabled(true);
             await _screenCapture.StopAsync();
         });
     }
@@ -371,6 +382,7 @@ public sealed partial class HostPage : Page
 
     private async void DiagnosticsTimer_Tick(DispatcherQueueTimer sender, object args)
     {
+        UpdateConnectedUi();
         var status =
             $"host codec={_screenCapture.ActiveCodec} { _screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight} " +
             $"try={_screenCapture.EncodeAttempts} ok={_screenCapture.EncodeSuccesses} empty={_screenCapture.EncodeEmpties} " +
@@ -408,7 +420,11 @@ public sealed partial class HostPage : Page
     private void OnViewerStatusReceived(object? sender, string status)
     {
         SessionLog.Write("host", $"viewer {status}");
-        _ = DispatcherQueue.EnqueueAsync(() => ViewerDiagnosticText.Text = $"接続側: {status}");
+        _ = DispatcherQueue.EnqueueAsync(() =>
+        {
+            UpdateConnectedUi();
+            ViewerDiagnosticText.Text = $"接続側: {status}";
+        });
     }
 
     private void OpenLogFolder_Click(object sender, RoutedEventArgs e)

@@ -5,16 +5,35 @@
     <Grid Padding="32">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="16" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel Orientation="Horizontal" Spacing="12">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12">
             <Button Content="戻る" Click="BackButton_Click" />
             <TextBlock Text="ホストモード" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" />
         </StackPanel>
 
-        <StackPanel Grid.Row="2" Spacing="16" MaxWidth="640">
+        <Border
+            x:Name="ConnectedActionsBar"
+            Grid.Row="1"
+            Visibility="Collapsed"
+            Padding="16"
+            CornerRadius="12"
+            Background="{ThemeResource AccentFillColorDefaultBrush}">
+            <StackPanel Spacing="10">
+                <TextBlock Text="クライアント接続中" FontWeight="SemiBold" Foreground="White" />
+                <Button
+                    x:Name="ExitViewerFullscreenButton"
+                    Content="接続側フル画面を解除"
+                    Click="ExitViewerFullscreenButton_Click"
+                    HorizontalAlignment="Left"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="3" Spacing="16" MaxWidth="640">
             <InfoBar
                 x:Name="FirewallInfoBar"
                 IsOpen="False"
@@ -82,12 +101,6 @@
 
             <TextBlock x:Name="StatusText" />
             <TextBlock x:Name="ConnectedClientText" Opacity="0.8" />
-            <Button
-                x:Name="ExitViewerFullscreenButton"
-                Content="接続側フル画面を解除"
-                Click="ExitViewerFullscreenButton_Click"
-                HorizontalAlignment="Left"
-                Visibility="Collapsed" />
             <TextBlock x:Name="FpsText" Opacity="0.8" Text="FPS: --" />
             <TextBlock
                 x:Name="DiagnosticText"

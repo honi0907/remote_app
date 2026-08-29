@@ -190,6 +190,7 @@ public sealed partial class ViewerPage : Page
             _pingTimer.Start();
             _fpsTimer.Start();
             SessionLog.Write("viewer", $"接続済み {address}:{port}");
+            RemoteCursorHelper.SetRemoteInputActive(true);
             HookMainWindowActivation();
             EnterFullscreen();
             RemoteCanvas.Focus(FocusState.Programmatic);
@@ -503,6 +504,7 @@ public sealed partial class ViewerPage : Page
             _isConnected = false;
             _pingTimer.Stop();
             _fpsTimer.Stop();
+            RemoteCursorHelper.SetRemoteInputActive(false);
             RemoteCursorHelper.ForceVisible();
             UnhookMainWindowActivation();
             ExitFullscreen();
@@ -570,18 +572,35 @@ public sealed partial class ViewerPage : Page
         if (_isConnected)
         {
             RemoteCursorHelper.SetHidden(true);
+            RemoteCursorHelper.ApplyBlankCursor();
             RemoteCanvas.Focus(FocusState.Pointer);
         }
     }
 
     private void RemoteCanvas_PointerExited(object sender, PointerRoutedEventArgs e)
     {
+        if (IsRemoteInputActive(_isConnected, RemotePanel.Visibility))
+        {
+            RemoteCursorHelper.ApplyBlankCursor();
+            return;
+        }
+
         RemoteCursorHelper.SetHidden(false);
     }
 
+    private static bool IsRemoteInputActive(bool isConnected, Visibility remotePanelVisibility) =>
+        isConnected && remotePanelVisibility == Visibility.Visible;
+
     private void RemoteCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isConnected || !TryGetNormalized(e.GetCurrentPoint(RemoteCanvas).Position, out var nx, out var ny))
+        if (!_isConnected)
+        {
+            return;
+        }
+
+        RemoteCursorHelper.ApplyBlankCursor();
+
+        if (!TryGetNormalized(e.GetCurrentPoint(RemoteCanvas).Position, out var nx, out var ny))
         {
             return;
         }
@@ -598,6 +617,7 @@ public sealed partial class ViewerPage : Page
 
         RemoteCanvas.CapturePointer(e.Pointer);
         _isPointerCaptured = true;
+        RemoteCursorHelper.ApplyBlankCursor();
         RemoteCanvas.Focus(FocusState.Pointer);
 
         if (!TryGetNormalized(e.GetCurrentPoint(RemoteCanvas).Position, out var nx, out var ny))
@@ -845,6 +865,10 @@ public sealed partial class ViewerPage : Page
         }
 
         _isFullscreen = false;
+        if (_isConnected)
+        {
+            RemoteCursorHelper.SetRemoteInputActive(true);
+        }
     }
 
     private void EnterFullscreenButton_Click(object sender, RoutedEventArgs e)
@@ -877,7 +901,12 @@ public sealed partial class ViewerPage : Page
     {
         if (e.WindowActivationState == WindowActivationState.Deactivated)
         {
-            RemoteCursorHelper.SetHidden(false);
+            return;
+        }
+
+        if (_isConnected)
+        {
+            RemoteCursorHelper.ApplyBlankCursor();
         }
     }
 

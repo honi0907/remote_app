@@ -24,6 +24,7 @@ public sealed class ScreenCaptureService : IAsyncDisposable
     private SizeInt32 _captureSize;
     private bool _isCapturing;
     private bool _encodingSuspended;
+    private bool _cursorCaptureEnabled = true;
     private IStreamFrameEncoder? _retiredEncoder;
     private int _encodesInFlight;
 
@@ -63,6 +64,15 @@ public sealed class ScreenCaptureService : IAsyncDisposable
         lock (_encoderSync)
         {
             _encodingSuspended = false;
+        }
+    }
+
+    public void SetCursorCaptureEnabled(bool enabled)
+    {
+        _cursorCaptureEnabled = enabled;
+        if (_session is not null)
+        {
+            _session.IsCursorCaptureEnabled = enabled;
         }
     }
 
@@ -117,7 +127,7 @@ public sealed class ScreenCaptureService : IAsyncDisposable
 
         _framePool.FrameArrived += OnFrameArrived;
         _session = _framePool.CreateCaptureSession(_captureItem);
-        _session.IsCursorCaptureEnabled = true;
+        _session.IsCursorCaptureEnabled = _cursorCaptureEnabled;
         _session.StartCapture();
         _isCapturing = true;
 
