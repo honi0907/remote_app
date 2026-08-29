@@ -89,6 +89,14 @@
                 Foreground="#E6B800"
                 TextWrapping="Wrap"
                 Text="診断: 待機中" />
+            <TextBlock
+                x:Name="ViewerDiagnosticText"
+                FontWeight="SemiBold"
+                Foreground="#4EC9B0"
+                TextWrapping="Wrap"
+                Text="接続側: 未受信" />
+            <TextBlock x:Name="LogPathText" Opacity="0.7" TextWrapping="Wrap" />
+            <Button Content="ログフォルダを開く" Click="OpenLogFolder_Click" HorizontalAlignment="Left" />
 
             <TextBlock
                 Text="保護されたコンテンツ（一部の動画やセキュアデスクトップ）はキャプチャできない場合があります。"

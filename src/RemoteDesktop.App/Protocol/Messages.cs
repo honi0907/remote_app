@@ -24,6 +24,7 @@ public enum MessageType : byte
     StreamConfig = 13,
     VideoFrame = 14,
     StreamStatus = 15,
+    ViewerStatus = 16,
 }
 
 public enum MouseButtonKind : byte

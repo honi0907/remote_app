@@ -26,14 +26,16 @@
             <TextBlock Grid.Column="6" x:Name="FpsText" Text="FPS: --" VerticalAlignment="Center" Opacity="0.8" />
         </Grid>
 
-        <TextBlock
-            x:Name="DiagnosticText"
-            Grid.Row="1"
-            Padding="16,0,16,8"
-            TextWrapping="Wrap"
-            FontWeight="SemiBold"
-            Foreground="#E6B800"
-            Text="診断: 未接続" />
+        <StackPanel Grid.Row="1" Padding="16,0,16,8" Spacing="4">
+            <TextBlock
+                x:Name="DiagnosticText"
+                TextWrapping="Wrap"
+                FontWeight="SemiBold"
+                Foreground="#E6B800"
+                Text="診断: 未接続" />
+            <TextBlock x:Name="LogPathText" Opacity="0.7" TextWrapping="Wrap" />
+            <Button Content="ログフォルダを開く" Click="OpenLogFolder_Click" HorizontalAlignment="Left" />
+        </StackPanel>
 
         <Grid Grid.Row="2">
             <StackPanel x:Name="ConnectionPanel" Padding="24" Spacing="16">

@@ -12,6 +12,7 @@ public sealed class SessionClient : IAsyncDisposable
     private Task? _readTask;
     private TaskCompletionSource<ConnectionResponseKind>? _connectionTcs;
     private TaskCompletionSource<AuthResult>? _authTcs;
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly object _mouseSync = new();
     private double _pendingMouseX;
     private double _pendingMouseY;
@@ -107,6 +108,17 @@ public sealed class SessionClient : IAsyncDisposable
     public async Task SendPingAsync()
     {
         await WriteAsync(MessageSerializer.BuildPing(DateTime.UtcNow.Ticks));
+    }
+
+    public async Task SendViewerStatusAsync(string text)
+    {
+        try
+        {
+            await WriteAsync(MessageSerializer.BuildViewerStatus(text));
+        }
+        catch (Exception)
+        {
+        }
     }
 
     public async Task DisconnectAsync()
@@ -233,12 +245,20 @@ public sealed class SessionClient : IAsyncDisposable
 
     private async Task WriteAsync(byte[] message)
     {
-        if (_stream is null)
+        await _writeLock.WaitAsync();
+        try
         {
-            return;
-        }
+            if (_stream is null)
+            {
+                return;
+            }
 
-        await _stream.WriteAsync(message);
+            await _stream.WriteAsync(message);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     private async Task FlushMouseMovesAsync()

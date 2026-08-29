@@ -73,6 +73,8 @@ public sealed partial class ViewerPage : Page
     {
         base.OnNavigatedTo(e);
         _cts = new CancellationTokenSource();
+        LogPathText.Text = $"ログ: {SessionLog.TodayPath("viewer")}";
+        SessionLog.Write("viewer", "接続画面を開きました");
         _ = Task.Run(() => DecodeLoopAsync(_cts.Token));
         await _discovery.StartListeningAsync(_cts.Token);
         RefreshHostList();
@@ -176,6 +178,7 @@ public sealed partial class ViewerPage : Page
             StatusText.Text = "接続済み";
             _pingTimer.Start();
             _fpsTimer.Start();
+            SessionLog.Write("viewer", $"接続済み {address}:{port}");
             RemoteCanvas.Focus(FocusState.Programmatic);
         }
         catch (Exception ex)
@@ -480,6 +483,7 @@ public sealed partial class ViewerPage : Page
             LatencyText.Text = "遅延: --";
             FpsText.Text = "FPS: --";
             SetDiagnostic("切断");
+            SessionLog.Write("viewer", "切断されました");
             await Task.CompletedTask;
         });
     }
@@ -495,8 +499,22 @@ public sealed partial class ViewerPage : Page
         var fps = _frameCount / elapsed.TotalSeconds;
         FpsText.Text = $"FPS: {fps:0}";
         SetDiagnostic(_lastDetail);
+        var line =
+            $"fps={fps:0} codec={_activeCodec} recv={_h264Received} key={_h264Keyframes} " +
+            $"dec={_h264Decoded} fail={_h264DecodeFailures} last={_lastPayloadBytes}B nonzero={_lastPixelNonZero} {_lastDetail}";
+        SessionLog.Write("viewer", line);
+        if (_isConnected)
+        {
+            _ = _sessionClient.SendViewerStatusAsync(line);
+        }
+
         _frameCount = 0;
         _fpsWindowStart = DateTime.UtcNow;
+    }
+
+    private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        SessionLog.OpenDirectory();
     }
 
     private async void PingTimer_Tick(DispatcherQueueTimer sender, object args)

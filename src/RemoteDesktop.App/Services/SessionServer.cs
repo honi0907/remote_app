@@ -22,6 +22,7 @@ public sealed class SessionServer : IAsyncDisposable
     private bool _authenticated;
 
     public event EventHandler<string>? ClientConnectionRequested;
+    public event EventHandler<string>? ViewerStatusReceived;
     public event EventHandler? ClientConnected;
     public event EventHandler? ClientDisconnected;
 
@@ -298,6 +299,10 @@ public sealed class SessionServer : IAsyncDisposable
             case MessageType.Key when _authenticated:
                 var key = MessageSerializer.ParseKey(message);
                 InputInjector.SendKey(key.VirtualKey, key.Action);
+                break;
+
+            case MessageType.ViewerStatus when _authenticated:
+                ViewerStatusReceived?.Invoke(this, MessageSerializer.ParseViewerStatus(message));
                 break;
 
             case MessageType.Ping:

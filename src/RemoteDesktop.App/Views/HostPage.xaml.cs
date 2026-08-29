@@ -36,6 +36,7 @@ public sealed partial class HostPage : Page
         _sessionServer.ClientConnectionRequested += OnClientConnectionRequested;
         _sessionServer.ClientConnected += OnClientConnected;
         _sessionServer.ClientDisconnected += OnClientDisconnected;
+        _sessionServer.ViewerStatusReceived += OnViewerStatusReceived;
         _screenCapture.FrameCaptured += OnFrameCaptured;
     }
 
@@ -43,6 +44,8 @@ public sealed partial class HostPage : Page
     {
         base.OnNavigatedTo(e);
         LoadSettingsIntoUi();
+        LogPathText.Text = $"ログ: {SessionLog.TodayPath("host")}";
+        SessionLog.Write("host", "ホスト画面を開きました");
 
         _pin = PinGenerator.CreatePin();
         PinText.Text = _pin;
@@ -245,6 +248,7 @@ public sealed partial class HostPage : Page
                     : $"クライアント接続済み - 画面共有中 ({codecLabel})";
                 ConnectedClientText.Text = "接続中のクライアント: 1";
                 DiagnosticText.Text = $"診断: 配信開始 codec={_screenCapture.ActiveCodec} capture={_screenCapture.CaptureWidth}x{_screenCapture.CaptureHeight}";
+                SessionLog.Write("host", DiagnosticText.Text);
                 _diagnosticsTimer.Start();
             }
             catch (Exception ex)
@@ -273,6 +277,8 @@ public sealed partial class HostPage : Page
             ConnectedClientText.Text = "接続中のクライアント: なし";
             FpsText.Text = "FPS: --";
             DiagnosticText.Text = "診断: 待機中";
+            ViewerDiagnosticText.Text = "接続側: 未受信";
+            SessionLog.Write("host", "クライアント切断");
             _diagnosticsTimer.Stop();
             await _screenCapture.StopAsync();
         });
@@ -312,6 +318,7 @@ public sealed partial class HostPage : Page
             $"try={_screenCapture.EncodeAttempts} ok={_screenCapture.EncodeSuccesses} empty={_screenCapture.EncodeEmpties} " +
             $"err={_screenCapture.LastEncodeError ?? "-"}";
         DiagnosticText.Text = $"診断: {status}";
+        SessionLog.Write("host", status);
 
         if (_sessionServer.HasAuthenticatedClient)
         {
@@ -338,6 +345,17 @@ public sealed partial class HostPage : Page
             {
             }
         }
+    }
+
+    private void OnViewerStatusReceived(object? sender, string status)
+    {
+        SessionLog.Write("host", $"viewer {status}");
+        _ = DispatcherQueue.EnqueueAsync(() => ViewerDiagnosticText.Text = $"接続側: {status}");
+    }
+
+    private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        SessionLog.OpenDirectory();
     }
 
     private void BackButton_Click(object sender, RoutedEventArgs e)
